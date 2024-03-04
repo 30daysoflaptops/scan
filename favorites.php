@@ -12,144 +12,105 @@
  File: favorites.php
 =====================================================
 */
-
-if(!defined('DATALIFEENGINE')) {
+if( !defined('DATALIFEENGINE') ) {
 	header( "HTTP/1.1 403 Forbidden" );
 	header ( 'Location: ../../' );
 	die( "Hacking attempt!" );
 }
 
-$id = intval( $_REQUEST['fav_id'] );
+if( isset( $_REQUEST['doaction'] ) ) $doaction = $_REQUEST['doaction']; else $doaction = "";
 
-if( !$id OR $id < 1) {
-	
-	echo json_encode(array("error" => true, "content" => 'action not correct' ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
-	die ();
-	
+$allow_add_comment = false;
+$allow_full_story = false;
+$allow_comments = false;
+$allow_userinfo = false;
+$allow_active_news = true;
+$where_date = "";
+$config['allow_cache'] = false;
+
+if( ! isset( $cstart ) ) $cstart = 0;
+
+if( $cstart ) {
+	$cstart = $cstart - 1;
+	$cstart = $cstart * $config['news_number'];
+	$start_from = $cstart;
 }
 
-if( !$is_logged ){
+$cstart = intval($cstart);
+
+$url_page = $config['http_home_url'] . "favorites";
+$user_query = "do=favorites";
+
+$list = explode( ",", $member_id['favorites'] );
+$list = array_reverse ( $list );
+$fav_list = array();
+$order_list = array();
+
+foreach ( $list as $daten ) {
+	$daten = intval($daten);
+	$fav_list[] = "'" . $daten . "'";
+	$order_list[] = $daten;
+}
+
+$list = implode( ",", $fav_list );
+
+$favorites = "(" . $list . ")";
+
+if( count($order_list) ) {
 	
-	echo json_encode(array("error" => true, "content" => $lang['fav_error'] ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
-	die ();
+	$order_list = implode( ",", $order_list );
+	$order_list = "ORDER BY FIND_IN_SET(id, '".$order_list."') ";
+
+} else $order_list = "";
+
+$stop_list = "";
+$allow_list = explode( ',', $user_group[$member_id['user_group']]['allow_cats'] );
+$cat_join = "";
+
+if( $allow_list[0] != "all" ) {
 	
-}
-
-if( !isset($_REQUEST['user_hash']) OR !$_REQUEST['user_hash'] OR $_REQUEST['user_hash'] != $dle_login_hash ) {
-
-	echo json_encode(array("error" => true, "content" => $lang['sess_error'] ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
-	die ();
+	if( $config['allow_multi_category'] ) {
+		
+		$cat_join = "INNER JOIN (SELECT DISTINCT(" . PREFIX . "_post_extras_cats.news_id) FROM " . PREFIX . "_post_extras_cats WHERE cat_id IN ('" . implode( "','", $allow_list ) . "')) c ON (p.id=c.news_id) ";
 	
-}
-$row = $db->super_query( "SELECT id, approve FROM " . PREFIX . "_post WHERE id ='{$id}'" );
-
-if( !$row['id'] ) {
-	echo json_encode(array("error" => true, "content" => $lang['news_page_err'] ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
-	die ();
-}
-
-if( !$row['approve'] AND $_REQUEST['action'] == "plus") {
-	echo json_encode(array("error" => true, "content" => $lang['fav_plus_err_2'] ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
-	die ();
-}
-
-$replace_fav = [];
-
-if (defined('TEMPLATE_DIR')) {
-	$template_dir = TEMPLATE_DIR;
-} else $template_dir = ROOT_DIR . "/templates/" . $config['skin'];
-
-if( $_REQUEST['module'] === 'short' OR $_REQUEST['module'] === 'full' ) {
-
-	if($_REQUEST['module'] == 'short') {
-		$data = file_get_contents($template_dir . "/shortstory.tpl");
 	} else {
-		$data = file_get_contents($template_dir . "/fullstory.tpl");
-	}
-
-	if (preg_match("'\\[add-favorites\\](.*?)\\[/add-favorites\\]'si", $data, $match)) {
-		$replace_fav['add_fav_html'] = "<a onclick=\"doFavorites('{$id}', 'plus', 1, '{$_REQUEST['module']}'); return false;\" href=\"#\">".$match[1]."</a>";
-	}
-
-	if (preg_match("'\\[del-favorites\\](.*?)\\[/del-favorites\\]'si", $data, $match)) {
-		$replace_fav['del_fav_html'] = "<a onclick=\"doFavorites('{$id}', 'minus', 1, '{$_REQUEST['module']}'); return false;\" href=\"#\">".$match[1]."</a>";
+		
+		$stop_list = "category IN ('" . implode( "','", $allow_list ) . "') AND ";
+	
 	}
 
 }
 
-if( $_REQUEST['action'] == "plus" ) {
+$not_allow_cats = explode ( ',', $user_group[$member_id['user_group']]['not_allow_cats'] );
 
-	if( trim($member_id['favorites']) ) {
+if( $not_allow_cats[0] != "" ) {
+			
+	if ($config['allow_multi_category']) {
+			
+		$stop_list = "p.id NOT IN ( SELECT DISTINCT(" . PREFIX . "_post_extras_cats.news_id) FROM " . PREFIX . "_post_extras_cats WHERE cat_id IN ('" . implode( "','", $not_allow_cats ) . "') ) AND ";
 		
-		$list = explode(",", $member_id['favorites'] );
-		$i = 0;
+	} else {
+			
+		$stop_list = "category NOT IN ('" . implode ( "','", $not_allow_cats ) . "') AND ";
 		
-		foreach ( $list as $daten ) {
-	
-			if( $daten == $id ) {
-				echo json_encode(array("error" => true, "content" => $lang['fav_plus_err_1'] ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
-				die ();
-			}
-			
-			$daten = intval($daten);
-			
-			if( !$daten OR $daten < 1 ) unset( $list[$i] );
-			
-			$i ++;
-	
-		}
-	
-	} else $list = array();
-	
-	$list[] = $id;
+	}
 
-	if( count( $list ) ) $member_id['favorites'] = $db->safesql(implode( ",", $list ));
-	else $member_id['favorites'] = "";
-	
-	$db->query( "UPDATE " . USERPREFIX . "_users SET favorites='{$member_id['favorites']}' WHERE user_id = '{$member_id['user_id']}'" );
-	
-	if( isset($replace_fav['add_fav_html']) ) unset($replace_fav['add_fav_html']);
-
-	if ( $_REQUEST['alert'] ) $buffer = $lang['fav_plus'];
-	else $buffer = "<img src=\"" . $config['http_home_url'] . "templates/{$config['skin']}/dleimages/minus_fav.gif\" onclick=\"doFavorites('" . $id . "', 'minus'); return false;\" title=\"" . $lang['news_minfav'] . "\" style=\"vertical-align: middle;border: none;\" />";
-
-} elseif( $_REQUEST['action'] == "minus" ) {
-	
-	if( trim($member_id['favorites']) ) {
-		
-		$list = explode(",", $member_id['favorites'] );
-		$i = 0;
-		
-		foreach ( $list as $daten ) {
-			
-			$daten = intval($daten);
-				
-			if( !$daten OR $daten < 1 ) unset( $list[$i] );
-			
-			if( $daten == $id ) unset( $list[$i] );
-			
-			$i ++;
-	
-		}
-		
-	} else $list = array();
-
-	if( count( $list ) ) $member_id['favorites'] = $db->safesql(implode( ",", $list ));
-	else $member_id['favorites'] = "";
-	
-	$db->query( "UPDATE " . USERPREFIX . "_users SET favorites='{$member_id['favorites']}' WHERE user_id = '{$member_id['user_id']}'" );
-	
-	if (isset($replace_fav['del_fav_html'])) unset($replace_fav['del_fav_html']);
-
-	if ( $_REQUEST['alert'] ) $buffer = $lang['fav_minus'];
-	else $buffer = "<img src=\"" . $config['http_home_url'] . "templates/{$config['skin']}/dleimages/plus_fav.gif\" onclick=\"doFavorites('" . $id . "', 'plus'); return false;\" title=\"" . $lang['news_addfav'] . "\" style=\"vertical-align: middle;border: none;\">";
-
-} else {
-	
-	echo json_encode(array("error" => true, "content" => 'action not correct' ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
-	die ();
-	
 }
 
-echo json_encode(array("success" => true, "content" => $buffer, "modify" => $replace_fav ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
-?>
+if( $config['user_in_news'] ) {
+	
+	$user_select = ", u.email, u.name, u.user_id, u.news_num, u.comm_num as user_comm_num, u.user_group, u.lastdate, u.reg_date, u.banned, u.allow_mail, u.info, u.signature, u.foto, u.fullname, u.land, u.favorites, u.pm_all, u.pm_unread, u.time_limit, u.xfields as user_xfields ";
+	$user_join = "LEFT JOIN " . USERPREFIX . "_users u ON (e.user_id=u.user_id) ";
+	
+} else { $user_select = ""; $user_join = ""; }
+		
+if( $user_group[$member_id['user_group']]['allow_short'] ) $stop_list = "";
+
+$sql_select = "SELECT p.id, p.autor, p.date, p.short_story, CHAR_LENGTH(p.full_story) as full_story, p.xfields, p.title, p.category, p.alt_name, p.comm_num, p.allow_comm, p.fixed, p.tags, e.news_read, e.allow_rate, e.rating, e.vote_num, e.votes, e.view_edit, e.editdate, e.editor, e.reason {$user_select}FROM " . PREFIX . "_post p {$cat_join}LEFT JOIN " . PREFIX . "_post_extras e ON (p.id=e.news_id) {$user_join}WHERE {$stop_list}approve=1 AND id in $favorites " .$order_list . "LIMIT " . $cstart . "," . $config['news_number'];
+$sql_count = "SELECT COUNT(*) as count FROM " . PREFIX . "_post p {$cat_join}WHERE {$stop_list}approve=1 AND id in {$favorites}";
+
+require (DLEPlugins::Check(ENGINE_DIR . '/modules/show.short.php'));
+
+if( $config['files_allow'] ) if( strpos( $tpl->result['content'], "[attachment=" ) !== false ) {
+	$tpl->result['content'] = show_attach( $tpl->result['content'], $attachments );
+}

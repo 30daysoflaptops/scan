@@ -1,7 +1,7 @@
 ?><?php
 /*
 =====================================================
- DataLife Engine - by SoftNews Media Group
+ DataLife Engine - by SoftNews Media Group 
 -----------------------------------------------------
  https://dle-news.ru/
 -----------------------------------------------------
@@ -10,146 +10,89 @@
  This code is protected by copyright
 =====================================================
  File: comments.php
------------------------------------------------------
- Use: Show comments
 =====================================================
 */
 
-if(!defined('DATALIFEENGINE')) {
+if( !defined('DATALIFEENGINE') ) {
 	header( "HTTP/1.1 403 Forbidden" );
 	header ( 'Location: ../../' );
 	die( "Hacking attempt!" );
 }
 
-$tpl = new dle_template( );
-$tpl->dir = ROOT_DIR . '/templates/' . $config['skin'];
-define( 'TEMPLATE_DIR', $tpl->dir );
+$id = isset($_REQUEST['id']) ? intval( $_REQUEST['id'] ) : 0;
+$action = isset($_REQUEST['action']) ? $_REQUEST['action'] : '';
+$subaction = isset($_REQUEST['subaction']) ? $_REQUEST['subaction'] : '';
+$_SESSION['referrer'] = isset($_SESSION['referrer']) ? str_replace("&amp;","&", $_SESSION['referrer'] ) : '';
+$_POST['selected_comments'] = isset($_POST['selected_comments']) ? $_POST['selected_comments'] : array();
 
-$news_id = intval($_GET['news_id']);
-$user_query = "newsid=" . $news_id;
+if(isset($_POST['mass_action']) AND $_POST['mass_action'] == "mass_combine" AND is_array($_POST['selected_comments']) AND count($_POST['selected_comments']) > 1) {
 
-if ($news_id < 1) die( "Hacking attempt!" );
+	if( $_POST['dle_allow_hash'] != "" AND $_POST['dle_allow_hash'] == $dle_login_hash AND $is_logged AND $user_group[$member_id['user_group']]['del_allc'] ) {
 
-$row = $db->super_query("SELECT id, date, category, alt_name, comm_num FROM " . PREFIX . "_post WHERE  id = '{$news_id}'");
+		$comments_array = array();
+		$ids_array = array();
 
-if (!$row['id']) die( "Hacking attempt!" );
-
-$row['date'] = strtotime( $row['date'] );
-$category_id = intval( $row['category'] );
-
-if( $row['date'] >= ($_TIME - 2592000) ) {
-
-	$allow_full_cache = $row['id'];
-
-} else $allow_full_cache = false;
-
-if( $config['allow_alt_url'] ) {
-
-	if( $config['seo_type'] == 1 OR $config['seo_type'] == 2 ) {
-
-		if( $category_id AND $config['seo_type'] == 2 ) {
-
-            $c_url = get_url( $category_id );
-            $full_link = $config['http_home_url'] . $c_url . "/" . $row['id'] . "-" . $row['alt_name'] . ".html";
-			$row['alt_name'] = $row['id'] . "-" . $row['alt_name'];
-			$link_page = $config['http_home_url'] . $c_url . "/" . 'page,1,';
-			$news_name = $row['alt_name'];
-
-		} else {
-
-			$full_link = $config['http_home_url'] . $row['id'] . "-" . $row['alt_name'] . ".html";
-			$row['alt_name'] = $row['id'] . "-" . $row['alt_name'];
-			$link_page = $config['http_home_url'] . 'page,1,';
-			$news_name = $row['alt_name'];
+		foreach ( $_POST['selected_comments'] as $id ) {
+			$comments_array[] = intval( $id );
 		}
 
-	} else {
+		$comments = implode("','", $comments_array);
+		$sql_result = $db->query( "SELECT id, text FROM " . PREFIX . "_comments where id IN ('" . $comments . "') ORDER BY id ASC" );
 
-		$link_page = $config['http_home_url'] . date( 'Y/m/d/', $row['date'] ) . 'page,1,';
-		$news_name = $row['alt_name'];
-		$full_link = $config['http_home_url'] . date( 'Y/m/d/', $row['date'] ) . $row['alt_name'] . ".html";
-	}
+		$comments = array();
+		while ( $row = $db->get_row( $sql_result ) ) {
+			$ids_array[] = $row['id'];
+			$comments[] = stripslashes( $row['text'] );
+		}
+		$db->free( $sql_result );
 
-} else {
+		if ((int)$config['allow_comments_wysiwyg'] < 1) $c_implode = "<br><br>";
+		else $c_implode = "";
 
-	$link_page = "";
-	$news_name = "";
-	$full_link = $config['http_home_url'] . "index.php?newsid=" . $row['id'];
-}
+		$comment = $db->safesql( implode($c_implode, $comments) );
 
-$comments = new DLE_Comments( $db, $row['comm_num'], intval($config['comm_nummers']) );
+		$db->query( "UPDATE " . PREFIX . "_comments SET text='{$comment}' WHERE id='{$ids_array[0]}'" );
 
-if( $config['comm_msort'] == "" OR $config['comm_msort'] == "ASC" ) $comm_msort = "ASC"; else $comm_msort = "DESC";
-
-if( $config['tree_comments'] ) $comm_msort = "ASC";
-
-if( $config['allow_cmod'] ) $where_approve = " AND " . PREFIX . "_comments.approve='1'";
-else $where_approve = "";
-
-$comments->query = "SELECT " . PREFIX . "_comments.id, post_id, " . PREFIX . "_comments.user_id, date, autor as gast_name, " . PREFIX . "_comments.email as gast_email, text, ip, is_register, " . PREFIX . "_comments.rating, " . PREFIX . "_comments.vote_num, " . PREFIX . "_comments.parent, name, " . USERPREFIX . "_users.email, news_num, comm_num, user_group, lastdate, reg_date, signature, foto, fullname, land, xfields FROM " . PREFIX . "_comments LEFT JOIN " . USERPREFIX . "_users ON " . PREFIX . "_comments.user_id=" . USERPREFIX . "_users.user_id WHERE " . PREFIX . "_comments.post_id = '$news_id'" . $where_approve . " ORDER BY " . PREFIX . "_comments.id " . $comm_msort;
-
-$comments->build_comments('comments.tpl', 'ajax', $allow_full_cache );
-
-$comments->build_navigation('navigation.tpl', $link_page . "{page}," . $news_name . ".html#comment", $user_query, $full_link);
-
-if ($_GET['massact'] != "disable" ) {
-
-	if ($config['comm_msort'] == "DESC" )
-		$tpl->result['comments'] = "<div id=\"dle-ajax-comments\"></div>" . $tpl->result['comments'];
-	else
-		$tpl->result['comments'] = $tpl->result['comments']."<div id=\"dle-ajax-comments\"></div>";
-
-	if ($user_group[$member_id['user_group']]['del_allc'] AND !$user_group[$member_id['user_group']]['edit_limit'])
-		$tpl->result['comments'] .= "\n<div class=\"mass_comments_action\">{$lang['mass_comments']}&nbsp;<select name=\"mass_action\"><option value=\"\">{$lang['edit_selact']}</option><option value=\"mass_combine\">{$lang['edit_selcomb']}</option><option value=\"mass_delete\">{$lang['edit_seldel']}</option></select>&nbsp;&nbsp;<input type=\"submit\" class=\"bbcodes\" value=\"{$lang['b_start']}\" /></div>\n<input type=\"hidden\" name=\"do\" value=\"comments\" /><input type=\"hidden\" name=\"dle_allow_hash\" value=\"{$dle_login_hash}\" /><input type=\"hidden\" name=\"area\" value=\"news\" />";
-
-}
-
-if( strpos ( $tpl->result['comments'], "dleplyrplayer" ) !== false ) {
-	
-	if( strpos ( $tpl->result['comments'], ".m3u8" ) !== false ) {
-		$load_more = "\$.getCachedScript( dle_root + 'engine/classes/html5player/plyr.js?v={$config['cache_id']}');";
-		$js_name = "hls.js"; 
-	} else {
-		$load_more = "";
-		$js_name = "plyr.js"; 
-	}
+		$parent = $ids_array[0];
+		unset ($ids_array[0]);
 		
-	$tpl->result['comments'] .= <<<HTML
-		<script>
-			if (typeof DLEPlayer == "undefined") {
+		foreach ( $ids_array as $id ) {
 			
-                $('<link>').appendTo('head').attr({type: 'text/css', rel: 'stylesheet',href: dle_root + 'engine/classes/html5player/plyr.css'});
-				  
-				$.getCachedScript( dle_root + 'engine/classes/html5player/{$js_name}?v={$config['cache_id']}').done(function() {
-				  {$load_more} 
-				});
-				
-			} else {
+			if ( $config['tree_comments'] ) {
+				$db->query( "UPDATE " . PREFIX . "_comments SET parent='{$parent}' WHERE parent ='{$id}'" );
+			}
 			
-				var containers = document.querySelectorAll(".dleplyrplayer");Array.from(containers).forEach(function (container) {new DLEPlayer(container);});
-				
-			}
-		</script>
-HTML;
+			deletecomments( $id );
 
-}
+		}
 
-if( strpos ( $tpl->result['content'], 'highslide' ) !== false ) {
+		clear_cache( array('news_', 'full_', 'comm_', 'rss' ) );
+			
+		header( "Location: {$_SESSION['referrer']}" );
+		die();	
+
+	} else msgbox( $lang['comm_err_2'], $lang['comm_err_4'] );
+
+} elseif(isset($_POST['mass_action']) AND $_POST['mass_action'] == "mass_delete" AND count($_POST['selected_comments']) ) {
+
+	if( $_POST['dle_allow_hash'] != "" AND $_POST['dle_allow_hash'] == $dle_login_hash AND $is_logged AND $user_group[$member_id['user_group']]['del_allc'] ) {
+
+		foreach ( $_POST['selected_comments'] as $id ) {
+			
+			$id = intval( $id );
+
+			deletecomments( $id );
+
+		}
+
+		clear_cache( array('news_', 'full_', 'comm_', 'rss' ) );
 	
-	$tpl->result['comments'] .= <<<HTML
-	
-	<script>
-			if (typeof Fancybox == "undefined" ) {
-				$.getCachedScript( dle_root + 'engine/classes/fancybox/fancybox.js?v={$config['cache_id']}');
-			}
-	</script>
-HTML;
-	
-	}
+		header( "Location: {$_SESSION['referrer']}" );
+		die();	
 
-$tpl->result['comments'] = str_replace( '{THEME}', $config['http_home_url'] . 'templates/' . $config['skin'], $tpl->result['comments'] );
-$tpl->result['commentsnavigation'] = str_replace( '{THEME}', $config['http_home_url'] . 'templates/' . $config['skin'], $tpl->result['commentsnavigation'] );
+	} else msgbox( $lang['comm_err_2'], $lang['comm_err_4'] );
 
-echo json_encode(array("navigation" => $tpl->result['commentsnavigation'], "comments" => $tpl->result['comments'] ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
+
+} else msgbox( $lang['comm_err_2'], $lang['comm_err_5']."&nbsp;<a href=\"javascript:history.go(-1);\">{$lang['all_prev']}</a>" );
 
 ?>

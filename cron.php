@@ -1,7 +1,7 @@
-<?php
+?><?php
 /*
 =====================================================
- DataLife Engine - by SoftNews Media Group
+ DataLife Engine - by SoftNews Media Group 
 -----------------------------------------------------
  https://dle-news.ru/
 -----------------------------------------------------
@@ -11,212 +11,262 @@
 =====================================================
  File: cron.php
 -----------------------------------------------------
- Use: Cron operations
+ Use: Performing automatic operations
 =====================================================
 */
-
-error_reporting(E_ALL ^ E_WARNING ^ E_DEPRECATED ^ E_NOTICE);
-ini_set('error_reporting', E_ALL ^ E_WARNING ^ E_DEPRECATED ^ E_NOTICE);
-
-/* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-To support the launch operations for the cron you need set a value 1 for the variable $allow_cron
- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
-
-$allow_cron = 0;
-
-/* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Specify the number of backup files database for save on the server
- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
-
-$max_count_files = 5;
-
-/* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Don't edit the code which follows below.
- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
-
-if ($allow_cron) {
-
-    define('DATALIFEENGINE', true);
-    define('AUTOMODE', true);
-    define('LOGGED_IN', true);
-
-    define('ROOT_DIR', dirname(__FILE__));
-    define('ENGINE_DIR', ROOT_DIR . '/engine');
-
-    require_once(ENGINE_DIR . '/classes/plugins.class.php');
-    require_once(DLEPlugins::Check(ENGINE_DIR . '/inc/include/functions.inc.php'));
-    include_once(DLEPlugins::Check(ROOT_DIR . '/language/' . $config['langs'] . '/website.lng'));
-
-    date_default_timezone_set($config['date_adjust']);
-
-    $cronmode = false;
-
-    if ($_REQUEST['cronmode']) {
-        $cronmode = $_REQUEST['cronmode'];
-    } elseif (isset($_SERVER['argc']) && !empty($_SERVER['argc']) && $_SERVER['argc'] > 1) {
-        $cronmode = $_SERVER['argv'][1];
-    }
-
-    $_REQUEST = array();
-    $_POST = array();
-    $_GET = array();
-    $_REQUEST['user_hash'] = 1;
-    $dle_login_hash = 1;
-
-    if ($cronmode == "sitemap") {
-
-        $_POST['action'] = "create";
-        $member_id = array();
-        $user_group = array();
-        $member_id['user_group'] = 1;
-        $user_group[$member_id['user_group']]['admin_googlemap'] = 1;
-
-        $cat_info = get_vars("category");
-
-        if (!is_array($cat_info)) {
-
-            $cat_info = array();
-
-            $db->query("SELECT * FROM " . PREFIX . "_category ORDER BY posi ASC");
-
-            while ($row = $db->get_row()) {
-                if (!$row['active']) {
-                    continue;
-                }
-
-                $cat_info[$row['id']] = array();
-
-                foreach ($row as $key => $value) {
-                    $cat_info[$row['id']][$key] = stripslashes($value);
-                }
-            }
-            set_vars("category", $cat_info);
-            $db->free();
-        }
-
-        include_once(DLEPlugins::Check(ROOT_DIR . '/engine/inc/googlemap.php'));
-
-        die("done");
-    } elseif ($cronmode == "optimize") {
-
-        $arr = array();
-        $tables = "";
-
-        $db->query("SHOW TABLES");
-        while ($row = $db->get_array()) {
-            if (substr($row[0], 0, strlen(PREFIX)) == PREFIX) {
-                $tables .= ", `" . $db->safesql($row[0]) . "`";
-            }
-        }
-        $db->free();
-
-        $tables = substr($tables, 1);
-        $query = "OPTIMIZE TABLE ";
-        $query .= $tables;
-
-        $db->query($query);
-        die("done");
-    } elseif ($cronmode == "antivirus") {
-
-        include_once(DLEPlugins::Check(ENGINE_DIR . '/classes/antivirus.class.php'));
-
-        $antivirus = new antivirus();
-        $antivirus->scan_files(ROOT_DIR, false, true);
-
-        if (count($antivirus->bad_files)) {
-            $found_files = "";
-
-            foreach ($antivirus->bad_files as $idx => $data) {
-                if ($data['type']) {
-                    $type = $lang['anti_modified'];
-                } else {
-                    $type = $lang['anti_not'];
-                }
-                $found_files .= "\n{$data['file_path']} {$type}\n";
-            }
-
-            $mail = new dle_mail($config);
-
-            $message = $lang['anti_message_1'] . "\n{$found_files}\n{$lang['anti_message_2']}\n\n{$lang['lost_mfg']} " . $config['http_home_url'];
-            $mail->send($config['admin_mail'], $lang['anti_subj'], $message);
-        }
-
-        die("done");
-
-    } else {
-
-        $files = array();
-
-        if( $config['backup_remote'] ) {
-
-            DLEFiles::init($config['backup_remote'], false);
-
-            $tmp_files = DLEFiles::ListDirectory("backup/", array("sql", "gz", "bz2"));
-
-            if (!DLEFiles::$error) {
-
-                foreach ($tmp_files['files'] as $key) {
-                    if (isset($key['name']) and $key['name']) {
-                        $prefix = explode("_", $key['name'] );
-                        $prefix = end($prefix);
-                        $prefix = explode(".", $prefix);
-                        $prefix = reset($prefix);
-
-                        if (strlen($prefix) == 32) {
-                            $files[] = $key['path'];
-                        }
-                    }
-                }
-
-            }
-
-        } else {
-
-            if (is_dir(ROOT_DIR . '/backup/') && $handle = opendir(ROOT_DIR . '/backup/')) {
-                while (false !== ($file = readdir($handle))) {
-                    if (preg_match("/^.+?\.sql(\.(gz|bz2))?$/", $file)) {
-
-                        $prefix = explode("_", $file);
-                        $prefix = end($prefix);
-                        $prefix = explode(".", $prefix);
-                        $prefix = reset($prefix);
-
-                        if (strlen($prefix) == 32) {
-                            $files[] = $file;
-                        }
-                    }
-                }
-
-                closedir($handle);
-            }
-
-        }
-
-        sort($files);
-        reset($files);
-
-        if (count($files) >= $max_count_files) {
-
-            if ($config['backup_remote']) {
-                DLEFiles::Delete($files[0]);
-            } else {
-                unlink(ROOT_DIR . '/backup/' . $files[0]);
-            }
-
-        }
-
-        $member_id = array();
-        $member_id['user_group'] = 1;
-        $member_id['name'] = "cron_auto_backup";
-        $_REQUEST['action'] = "backup";
-        $_POST['comp_method'] = 1;
-        $_TIME = time();
-        $_IP = "127.0.0.1";
-
-        include_once(DLEPlugins::Check(ROOT_DIR . '/engine/inc/dumper.php'));
-
-        die("done");
-    }
+if( !defined('DATALIFEENGINE') ) {
+	header( "HTTP/1.1 403 Forbidden" );
+	header ( 'Location: ../../' );
+	die( "Hacking attempt!" );
 }
 
-die("Cron not allowed");
+if( !isset($cron_time['locked']) OR !isset($cron_time['time']) OR (isset($cron_time['locked']) AND $cron_time['locked'] AND $cron_time['lasttime'] < $_TIME - 120 ) ) {
+
+	$cron_data = array( 'time' => $_TIME, 'locked' => true);
+	$cron_clear_cache = false;
+ 
+	if( !isset($cron_time['time']) ) {
+		
+		$cron_data['successtime'] = $_TIME - (3600 * 25);
+		
+	} else $cron_data['successtime'] = $cron_time['time'];
+	
+	set_vars( "cron", $cron_data );
+
+	if( $cron == 1 ) {
+		$db->query( "DELETE FROM " . PREFIX . "_spam_log WHERE is_spammer = '0'" );
+	}
+	
+	if( $config['cache_count'] ) {
+		$result = $db->query( "SELECT COUNT(*) as count, news_id FROM " . PREFIX . "_views GROUP BY news_id" );
+		
+		while ( $row = $db->get_array( $result ) ) {
+
+			$cron_clear_cache = true;
+
+			$db->query( "UPDATE " . PREFIX . "_post_extras SET news_read=news_read+{$row['count']} WHERE news_id='{$row['news_id']}'" );
+			$db->query( "DELETE FROM " . PREFIX . "_views WHERE news_id = '{$row['news_id']}'" );
+		
+		}
+		
+		$db->free( $result );
+		$db->query( "TRUNCATE TABLE " . PREFIX . "_views" );
+
+		if ( $cron_clear_cache ) clear_cache( array('news_', 'full_') );
+	
+	}
+	
+	if( $cron == 2 ) {
+		
+		$db->query( "TRUNCATE TABLE " . PREFIX . "_login_log" );
+		$db->query( "TRUNCATE TABLE " . PREFIX . "_flood" );
+		$db->query( "TRUNCATE TABLE " . PREFIX . "_mail_log" );
+		$db->query( "TRUNCATE TABLE " . PREFIX . "_read_log" );
+		$db->query( "TRUNCATE TABLE " . PREFIX . "_spam_log" );
+		$db->query( "TRUNCATE TABLE " . PREFIX . "_banners_logs" );
+		$db->query( "TRUNCATE TABLE " . USERPREFIX . "_downloads_log" );
+	
+		$row = $db->super_query( "SELECT COUNT(*) as count FROM " . USERPREFIX . "_lostdb" );
+		
+		if($row['count'] > 3 ) {
+			$row['count'] = $row['count'] - 3;
+			$db->query( "DELETE FROM " . USERPREFIX . "_lostdb ORDER BY id LIMIT {$row['count']}" );
+		}
+		
+		$db->query( "DELETE FROM " . USERPREFIX . "_banned WHERE days != '0' AND date < '$_TIME' AND users_id = '0'" );
+		@unlink( ENGINE_DIR . '/cache/system/banned.php' );
+		
+		$sql_cron = $db->query( "SELECT * FROM " . PREFIX . "_post_log WHERE expires <= '" . $_TIME . "'" );
+		
+		while ( $row = $db->get_row( $sql_cron ) ) {
+	
+			if ( $row['action'] == 2 ) {
+
+				$cron_clear_cache = true;
+
+				$db->query( "UPDATE " . PREFIX . "_post SET approve='0' WHERE id='{$row['news_id']}'" );
+				$db->query( "DELETE FROM " . PREFIX . "_tags WHERE news_id = '{$row['news_id']}'" );
+				$db->query( "DELETE FROM " . PREFIX . "_post_extras_cats WHERE news_id = '{$row['news_id']}'" );
+				$db->query( "DELETE FROM " . PREFIX . "_xfsearch WHERE news_id = '{$row['news_id']}'" );
+		
+			} elseif ( $row['action'] == 3 ) {
+	
+				$db->query( "UPDATE " . PREFIX . "_post SET allow_main='0' WHERE id='{$row['news_id']}'" );
+	
+			} elseif ( $row['action'] == 4 ) {
+	
+				$db->query( "UPDATE " . PREFIX . "_post SET fixed='0' WHERE id='{$row['news_id']}'" );
+				
+			} elseif ( $row['action'] == 5 ) {
+
+				$cron_clear_cache = true;
+
+				$db->query( "UPDATE " . PREFIX . "_post SET category='{$row['move_cat']}' WHERE id='{$row['news_id']}'" );
+	
+				$db->query( "DELETE FROM " . PREFIX . "_post_extras_cats WHERE news_id = '{$row['news_id']}'" );
+	
+				if( $row['move_cat'] ) {
+	
+					$cat_ids = array ();
+	
+					$cat_ids_arr = explode( ",", $row['move_cat'] );
+	
+					foreach ( $cat_ids_arr as $value ) {
+	
+						$cat_ids[] = "('" . $row['news_id'] . "', '" . trim( $value ) . "')";
+					}
+	
+					$cat_ids = implode( ", ", $cat_ids );
+					$db->query( "INSERT INTO " . PREFIX . "_post_extras_cats (news_id, cat_id) VALUES " . $cat_ids );
+	
+				}
+			
+			} elseif ( $row['action'] == 1 ) {
+				
+				$cron_clear_cache = true;
+
+				$row_title = $db->super_query( "SELECT title  FROM " . PREFIX . "_post WHERE id='{$row['news_id']}'" );
+				$row_title = $db->safesql( $row_title['title'] );
+	
+				$db->query( "INSERT INTO " . USERPREFIX . "_admin_logs (name, date, ip, action, extras) values ('dle_cron_auto', '{$_TIME}', 'localhost', '96', '{$row_title}')" );
+	
+				deletenewsbyid( $row['news_id'] );
+	
+			}
+			
+			$db->query( "DELETE FROM " . PREFIX . "_post_log WHERE news_id = '{$row['news_id']}'" );
+
+		}
+		
+		$db->query( "DELETE FROM " . PREFIX . "_post_log WHERE expires <= '" . $_TIME . "'" );
+		
+		$db->free( $sql_cron );
+		
+		if( intval( $config['max_users_day'] ) ) {
+			$thisdate = $_TIME - ($config['max_users_day'] * 3600 * 24);
+			
+			$sql_result = $db->query( "SELECT user_id FROM " . USERPREFIX . "_users WHERE lastdate < '{$thisdate}' AND user_group > '1'" );
+			
+			while ( $row = $db->get_row( $sql_result ) ) {
+				deleteuserbyid($row['user_id']);
+			}
+	
+			$db->free( $sql_result );
+			
+		}
+		
+		if( intval( $config['max_image_days'] ) ) {
+			
+			DLEFiles::init();
+		
+			$thisdate = $_TIME - ($config['max_image_days'] * 3600 * 24);
+			
+			$sql_result = $db->query( "SELECT id, images  FROM " . PREFIX . "_images WHERE date < '$thisdate' AND news_id = '0'" );
+			
+			while ( $row = $db->get_row( $sql_result ) ) {
+				
+				$db->query( "DELETE FROM " . PREFIX . "_images WHERE id = '{$row['id']}'" );
+				
+				if( isset($row['images']) AND $row['images']) {
+					
+					$listimages = explode( "|||", $row['images'] );
+				
+					foreach ( $listimages as $dataimage ) {
+						
+						$dataimage = get_uploaded_image_info($dataimage);
+						
+						$query = $db->safesql( $dataimage->path );
+						$row = $db->super_query("SELECT COUNT(*) as count FROM " . PREFIX . "_post WHERE short_story LIKE '%{$query}%' OR full_story LIKE '%{$query}%' OR xfields LIKE '%{$query}%'");
+			
+						if( isset($row['count']) AND $row['count'] ) {
+							continue;
+						}
+						
+						if( $dataimage->remote ) $disk = DLEFiles::FindDriver($dataimage->url);
+						else $disk = 0;
+				
+						DLEFiles::Delete( "posts/" . $dataimage->path, $disk );
+
+						if ($dataimage->hidpi) {
+							DLEFiles::Delete("posts/{$dataimage->folder}/{$dataimage->hidpi}", $disk);
+						}
+
+						if( $dataimage->thumb ) {
+							
+							DLEFiles::Delete( "posts/{$dataimage->folder}/thumbs/{$dataimage->name}", $disk );
+
+							if ($dataimage->hidpi) {
+								DLEFiles::Delete("posts/{$dataimage->folder}/thumbs/{$dataimage->hidpi}", $disk);
+							}
+						}
+						
+						if( $dataimage->medium ) {
+							
+							DLEFiles::Delete( "posts/{$dataimage->folder}/medium/{$dataimage->name}", $disk );
+							
+							if ($dataimage->hidpi) {
+								DLEFiles::Delete("posts/{$dataimage->folder}/medium/{$dataimage->hidpi}", $disk);
+							}	
+						}
+					
+					}
+					
+				}
+			
+			}
+			
+			$db->free( $sql_result );
+	
+			$sql_result = $db->query( "SELECT * FROM " . PREFIX . "_files WHERE date < '$thisdate' AND news_id = '0'" );
+					
+			while ( $row = $db->get_row( $sql_result ) ) {
+				
+				$db->query( "DELETE FROM " . PREFIX . "_files WHERE id = '{$row['id']}'" );
+				
+				if( trim($row['onserver']) == ".htaccess") die("Hacking attempt!");
+				
+				if( $row['is_public'] ) $uploaded_path = 'public_files/'; else $uploaded_path = 'files/';
+	
+				DLEFiles::Delete( $uploaded_path.$row['onserver'], $row['driver'] );
+
+			}
+			
+			$db->free( $sql_result );
+			
+			$sql_result = $db->query( "SELECT id, name, driver FROM " . PREFIX . "_comments_files WHERE date < '{$thisdate}' AND c_id = '0'" );
+					
+			while ( $row = $db->get_row( $sql_result ) ) {
+				
+				$db->query( "DELETE FROM " . PREFIX . "_comments_files WHERE id = '{$row['id']}'" );
+	
+				$dataimage = get_uploaded_image_info( $row['name'] );
+				
+				DLEFiles::Delete( "posts/" . $dataimage->path, $row['driver'] );
+				
+				if( $dataimage->thumb ) {
+					
+					DLEFiles::Delete( "posts/{$dataimage->folder}/thumbs/{$dataimage->name}", $row['driver'] );
+					
+				}
+	
+			}
+			
+			$db->free( $sql_result );
+			
+		
+		}
+
+		if( $cron_clear_cache ) {
+			clear_cache(array('news_', 'full_', 'tagscloud_', 'archives_', 'related_', 'calendar_', 'rss', 'stats'));
+		}
+	
+	}
+	
+	unset($cron_data['locked']);
+	unset($cron_data['successtime']);
+	
+	set_vars( "cron", $cron_data );
+
+}
+
+?>

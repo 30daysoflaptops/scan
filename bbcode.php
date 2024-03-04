@@ -1,4 +1,4 @@
-?><?php
+?><?PHP
 /*
 =====================================================
  DataLife Engine - by SoftNews Media Group 
@@ -11,21 +11,34 @@
 =====================================================
  File: bbcode.php
 -----------------------------------------------------
- Use: BB panel
+ Use: bbcode
 =====================================================
 */
 
-if(!defined('DATALIFEENGINE')) {
+if( !defined('DATALIFEENGINE') ) {
 	header( "HTTP/1.1 403 Forbidden" );
 	header ( 'Location: ../../' );
 	die( "Hacking attempt!" );
 }
 
-if( $config['emoji'] ) {
+$dark_theme = "";
 
-$emoji_script = <<<HTML
-<script>
-<!--
+if (defined('TEMPLATE_DIR')) {
+	$template_dir = TEMPLATE_DIR;
+} else $template_dir = ROOT_DIR . "/templates/" . $config['skin'];
+
+if (is_file($template_dir . "/info.json")) {
+
+	$data = json_decode(trim(file_get_contents($template_dir . "/info.json")), true);
+
+	if (isset($data['type']) and $data['type'] == "dark") {
+		$dark_theme = " dle_theme_dark";
+	}
+}
+
+if( $config['emoji'] AND $config['allow_comments_wysiwyg'] != "-1" ) {
+
+$onload_scripts[] = <<<HTML
 	display_last_emoji();
 			
 	$(".emoji-button div[data-emoji]").each(function(){
@@ -39,8 +52,6 @@ $emoji_script = <<<HTML
 		}
 	
 	});
--->
-</script>
 HTML;
 
 
@@ -71,8 +82,8 @@ HTML;
 $output .= "</div>";
 	
 } else {
-	
-	$emoji_script = "";
+
+
 	$i = 0;
 	$output = "<table style=\"width:100%;border: 0px;padding: 0px;\"><tr>";
 	
@@ -105,21 +116,25 @@ $output .= "</div>";
 	
 	$output .= "</tr></table>";
 
-}
+}	
 
-if ($addtype == "addnews") {
+if (isset($addtype) AND $addtype == "addnews") {
 
-   $addform = "document.ajaxnews".$id; 
-   $startform = "dleeditnews".$id;
-   $p_name = urlencode($row['autor']);
+   $js_array[] = "engine/classes/js/bbcodes.js";
+   $js_array[] = "engine/classes/js/typograf.min.js";
+
+   $startform = "short_story"; 
+   $addform = "document.entryform";
+
+   $add_id = (isset($_REQUEST['id'])) ? intval($_REQUEST['id']) : '';
+   $p_name = urlencode($member_id['name']);
 
    if ($is_logged AND ($user_group[$member_id['user_group']]['allow_image_upload'] OR $user_group[$member_id['user_group']]['allow_file_upload']) )
    {
-      $image_upload = "<b id=\"b_up\" class=\"bb-btn\" onclick=\"dle_image_upload('{$p_name}', '{$row['id']}'); return false;\" title=\"{$lang['bb_t_up']}\"></b>";
+      $image_upload = "<b id=\"b_up\" class=\"bb-btn\" onclick=\"dle_image_upload( '{$p_name}', '{$add_id}' ); return false;\" title=\"{$lang['bb_t_up']}\"></b>";
+   } else { $image_upload = ""; }
 
-   } else $image_upload = "";
-
-$code = <<<HTML
+$bb_code = <<<HTML
 <div class="bb-pane{$dark_theme}">
 <b id="b_b" class="bb-btn" onclick="simpletag('b')" title="{$lang['bb_t_b']}"></b>
 <b id="b_i" class="bb-btn" onclick="simpletag('i')" title="{$lang['bb_t_i']}"></b>
@@ -148,7 +163,7 @@ $code = <<<HTML
 <b id="b_quote" class="bb-btn" onclick="simpletag('quote')" title="{$lang['bb_t_quote']}"></b>
 <b id="b_code" class="bb-btn" onclick="simpletag('code')" title="{$lang['bb_t_code']}"></b>
 <div class="clr"></div>
-<b id="b_header" class="bb-btn" onclick="show_bb_dropdown(this)" title="{$lang['bb_t_header']}" tabindex="-1" ></b>
+<b id="b_header" class="bb-btn" onclick="show_bb_dropdown(this)" title="{$lang['bb_t_header']}" tabindex="-1"></b>
 <ul class="bb-pane-dropdown">
 	<li><a onclick="javascript:insert_header('1'); return(false);" href="#"><h1>{$lang['bb_header']} 1</h1></a></li>
 	<li><a onclick="javascript:insert_header('2'); return(false);" href="#"><h2>{$lang['bb_header']} 2</h2></a></li>
@@ -158,7 +173,7 @@ $code = <<<HTML
 	<li><a onclick="javascript:insert_header('6'); return(false);" href="#"><h6>{$lang['bb_header']} 6</h6></a></li>
 </ul>
 <span class="bb-sep"></span>
-<b id="b_font" class="bb-btn" onclick="show_bb_dropdown(this)" title="{$lang['bb_t_font']}" tabindex="-1" ></b>
+<b id="b_font" class="bb-btn" onclick="show_bb_dropdown(this)" title="{$lang['bb_t_font']}" tabindex="-1"></b>
 <ul class="bb-pane-dropdown">
 	<li><a onclick="javascript:insert_font('Arial', 'font'); return(false);" href="#" style="font-family:Arial">Arial</a></li>
 	<li><a onclick="javascript:insert_font('Arial Black', 'font'); return(false);" href="#" style="font-family:Arial Black">Arial Black</a></li>
@@ -172,7 +187,7 @@ $code = <<<HTML
 	<li><a onclick="javascript:insert_font('Verdana', 'font'); return(false);" href="#" style="font-family:Verdana">Verdana</a></li>
 </ul>
 <span class="bb-sep"></span>
-<b id="b_size" class="bb-btn" onclick="show_bb_dropdown(this)" title="{$lang['bb_t_size']}" tabindex="-1" ></b>
+<b id="b_size" class="bb-btn" onclick="show_bb_dropdown(this)" title="{$lang['bb_t_size']}" tabindex="-1"></b>
 <ul class="bb-pane-dropdown">
 	<li><a onclick="javascript:insert_font('1', 'size'); return(false);" href="#" style="font-size:8pt;">1</a></li>
 	<li><a onclick="javascript:insert_font('2', 'size'); return(false);" href="#" style="font-size:10pt;">2</a></li>
@@ -208,14 +223,12 @@ $code = <<<HTML
 </div>
 HTML;
 
-$code = str_replace ("{THEME}", $config['http_home_url'] . 'templates/' . $config['skin'], $code);
 
-$image_align = array ();
+$image_align = array (0 => '', 'left' => '', 'right' => '', 'center' => '');
 $image_align[$config['image_align']] = "selected";
 
-$js_code = <<<HTML
-<script src="{$config['http_home_url']}engine/classes/js/typograf.min.js"></script>
-<script src="{$config['http_home_url']}engine/classes/js/bbcodes.js"></script>
+
+$bb_js_code = <<<HTML
 <script>
 <!--
 var text_enter_url       = "{$lang['bb_url']}";
@@ -254,41 +267,49 @@ var img_align_sel  	    = "<select name='dleimagealign' id='dleimagealign' class
 
 var selField  = "{$startform}";
 var fombj    = {$addform};
-
 -->
 </script>
-{$emoji_script}
 HTML;
 
 } else {
 
 	if( $config['allow_comments_wysiwyg'] == "-1" ) {
 
-		$bb_code = "";
-		$script_code = "";
-		$code = "";
-		$addform = "document.getElementById( 'dlemasscomments' )"; 
-		$startform = "dleeditcomments".$id;
+		$code = <<<HTML
+<div class="bb-editor">
+<textarea name="comments" id="comments" cols="70" rows="10">{$text}</textarea>
+</div>
+HTML;
+
+		$bb_code = 	$code;
+		$startform = "comments"; 
+		$addform = "document.getElementById( 'dle-comments-form' )";
+		$add_id = false;
 		
 	} else {
-
-		$addform = "document.getElementById( 'dlemasscomments' )"; 
-		$startform = "dleeditcomments".$id;
-	 
-		if ($user_group[$member_id['user_group']]['allow_url'])
-		{
-		   $url_link = "<b id=\"b_url\" class=\"bb-btn\" onclick=\"tag_url()\" title=\"{$lang['bb_t_url']}\"></b><b id=\"b_leech\" class=\"bb-btn\" onclick=\"tag_leech()\" title=\"{$lang['bb_t_leech']}\"></b>";
-		} 
-		else {$url_link = "";}
-	 
-		if ($user_group[$member_id['user_group']]['allow_image'])
-		{
-		   $image_link = "<b id=\"b_img\" class=\"bb-btn\" onclick=\"tag_image()\" title=\"{$lang['bb_b_img']}\"></b>";
-		} else $image_link = "";
 		
-		if ($is_logged AND $user_group[$member_id['user_group']]['allow_up_image'] AND !$comments_image_uploader_loaded ) {
-			$image_upload = "<b id=\"b_up\" class=\"bb-btn\" onclick=\"media_upload( 'comments', '{$p_name}', '{$p_id}', 'no'); return false;\" title=\"{$lang['bb_t_up']}\"></b>";
-		} else { $image_upload = ""; }
+		$js_array[] = "engine/classes/js/bbcodes.js";
+		$startform = "comments"; 
+		$addform = "document.getElementById( 'dle-comments-form' )";
+		$add_id = false;
+	
+		if ($user_group[$member_id['user_group']]['allow_url']) {
+		  $url_link = "<b id=\"b_url\" class=\"bb-btn\" onclick=\"tag_url()\" title=\"{$lang['bb_t_url']}\"></b><b id=\"b_leech\" class=\"bb-btn\" onclick=\"tag_leech()\" title=\"{$lang['bb_t_leech']}\"></b>";
+		} else $url_link = "";
+	
+		if ($user_group[$member_id['user_group']]['allow_image']) {
+			$image_link = "<b id=\"b_img\" class=\"bb-btn\" onclick=\"tag_image()\" title=\"{$lang['bb_b_img']}\"></b>";
+		} else $image_link = "";
+
+		$image_upload = "";
+
+		if ($is_logged AND $user_group[$member_id['user_group']]['allow_up_image'] ) {
+			
+			$p_name = urlencode($member_id['name']);
+			
+			if( !$comments_image_uploader_loaded ) $image_upload = "<b id=\"b_up\" class=\"bb-btn\" onclick=\"media_upload( 'comments', '{$p_name}', 0, 'no'); return false;\" title=\"{$lang['bb_t_up']}\"></b>";
+			
+		}
 		
 		if ($user_group[$member_id['user_group']]['video_comments']) {
 			$v_link = "<b id=\"b_video\" class=\"bb-btn\" onclick=\"tag_video()\" title=\"{$lang['bb_t_video']}\"></b><b id=\"b_audio\" class=\"bb-btn\" onclick=\"tag_audio()\" title=\"{$lang['bb_t_audio']}\"></b>";
@@ -298,12 +319,14 @@ HTML;
 			$m_link = "<b id=\"b_yt\" class=\"bb-btn\" onclick=\"tag_youtube()\" title=\"{$lang['bb_t_youtube']}\"></b>";
 		} else $m_link = "";
 		
+   
 		$code = <<<HTML
+<div class="bb-editor{$dark_theme}">
 <div class="bb-pane">
 <b id="b_b" class="bb-btn" onclick="simpletag('b')" title="{$lang['bb_t_b']}"></b>
 <b id="b_i" class="bb-btn" onclick="simpletag('i')" title="{$lang['bb_t_i']}"></b>
 <b id="b_u" class="bb-btn" onclick="simpletag('u')" title="{$lang['bb_t_u']}"></b>
-<b id="b_s" class="bb-btn" onclick="simpletag('s')" title={$lang['bb_t_s']}"></b>
+<b id="b_s" class="bb-btn" onclick="simpletag('s')" title="{$lang['bb_t_s']}"></b>
 <span class="bb-sep"></span>
 <b id="b_left" class="bb-btn" onclick="simpletag('left')" title="{$lang['bb_t_l']}"></b>
 <b id="b_center" class="bb-btn" onclick="simpletag('center')" title="{$lang['bb_t_c']}"></b>
@@ -327,15 +350,15 @@ HTML;
 <b id="b_tnl" class="bb-btn" onclick="translit()" title="{$lang['bb_t_translit']}"></b>
 <b id="b_spoiler" class="bb-btn" onclick="simpletag('spoiler')" title="{$lang['bb_t_spoiler']}"></b>
 </div>
+<textarea name="comments" id="comments" cols="70" rows="10" onfocus="setNewField(this.name, document.getElementById( 'dle-comments-form' ))">{$text}</textarea>
+</div>
 HTML;
-
-		$code = str_replace ("{THEME}", $config['http_home_url'] . 'templates/' . $config['skin'], $code);
-		
-		$image_align = array ();
+	
+		$image_align = array (0 => '', 'left' => '', 'right' => '', 'center' => '');
 		$image_align[$config['image_align']] = "selected";
-		
+	
+	
 		$bb_code = <<<HTML
-<script src="{$config['http_home_url']}engine/classes/js/bbcodes.js"></script>
 <script>
 <!--
 var text_enter_url       = "{$lang['bb_url']}";
@@ -371,14 +394,12 @@ var text_alt_image      = "{$lang['bb_alt_image']}";
 var img_align  	        = "{$lang['images_align']}";
 var text_last_emoji     = "{$lang['emoji_last']}";
 var img_align_sel  	    = "<select name='dleimagealign' id='dleimagealign' class='ui-widget-content ui-corner-all'><option value='' {$image_align[0]}>{$lang['images_none']}</option><option value='left' {$image_align['left']}>{$lang['images_left']}</option><option value='right' {$image_align['right']}>{$lang['images_right']}</option><option value='center' {$image_align['center']}>{$lang['images_center']}</option></select>";
-
+	
 var selField  = "{$startform}";
 var fombj    = {$addform};
-
 -->
 </script>
 {$code}
-{$emoji_script}
 HTML;
 	}
 }

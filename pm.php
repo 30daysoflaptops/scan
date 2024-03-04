@@ -15,37 +15,25 @@
 =====================================================
 */
 
-if(!defined('DATALIFEENGINE')) {
+if( !defined('DATALIFEENGINE') ) {
 	header( "HTTP/1.1 403 Forbidden" );
 	header ( 'Location: ../../' );
 	die( "Hacking attempt!" );
 }
 
-if( !$is_logged ) {
-	die ( "Hacking attempt!" );
-}
-
-if( !isset($_REQUEST['user_hash']) OR !$_REQUEST['user_hash'] OR $_REQUEST['user_hash'] != $dle_login_hash ) {
-
-	die ("error");
-	
-}
-
-if( $config['allow_comments_wysiwyg'] < 1) {
-	
-	$parse = new ParseFilter();
-	
-} else {
+if( $config['allow_comments_wysiwyg'] > 0 ) {
 
 	$allowed_tags = array('div[align|style|class|data-commenttime|data-commentuser|contenteditable]', 'span[style|class|data-userurl|data-username|contenteditable]', 'p[align|style|class]', 'pre[class]', 'code', 'br', 'strong', 'em', 'ul', 'li', 'ol', 'b', 'u', 'i', 's', 'hr');
 	
-	if( $user_group[$member_id['user_group']]['allow_url'] ) $allowed_tags[] = 'a[href|target|style|class]';
-	if( $user_group[$member_id['user_group']]['allow_image'] ) $allowed_tags[] = 'img[style|class|src]';
+	if( $user_group[$member_id['user_group']]['allow_url'] ) $allowed_tags[] = 'a[href|target|style|class|title]';
+	if( $user_group[$member_id['user_group']]['allow_image'] ) $allowed_tags[] = 'img[style|class|src|alt|width|height]';
 	
-	$parse = new ParseFilter($allowed_tags);
-	
+	$parse = new ParseFilter( $allowed_tags );
+
+} else {
+	$parse = new ParseFilter();
 }
-	
+
 $parse->safe_mode = true;
 $parse->remove_html = false;
 $parse->allow_video = false;
@@ -54,26 +42,176 @@ $parse->disable_leech = true;
 $parse->allow_url = $user_group[$member_id['user_group']]['allow_url'];
 $parse->allow_image = $user_group[$member_id['user_group']]['allow_image'];
 
-if ($_POST['action'] == "send_pm") {
+$user_group[$member_id['user_group']]['allow_up_image'] = 0;
+$user_group[$member_id['user_group']]['video_comments'] = 0;
+$user_group[$member_id['user_group']]['media_comments'] = 0;
 
-	if(!$user_group[$member_id['user_group']]['allow_pm'] ) {
-		echo "{\"error\":\" {$lang['pm_err_1']}\"}";
-		die();
+$p_name = "";
+$p_id = "";
+
+$stop_pm = FALSE;
+if( isset( $_REQUEST['doaction'] ) ) $doaction = $_REQUEST['doaction'];
+else $doaction = "";
+
+if( !$is_logged OR !$user_group[$member_id['user_group']]['allow_pm'] ) {
+	
+	if( !$is_logged AND isset($_GET['pmid']) AND $_GET['pmid'] ) {
+		
+		msgbox( $lang['all_err_1'], $lang['pm_err_12'] );
+		
+	} elseif ( !$is_logged ) {
+		
+		msgbox( $lang['all_err_1'], $lang['pm_err_13'] );
+		
+	} else {
+		
+		msgbox( $lang['all_err_1'], $lang['pm_err_1'] );
+		
 	}
 	
-	if( $user_group[$member_id['user_group']]['max_pm_day'] ) {
+	$stop_pm = TRUE;
+}
+
+if( $user_group[$member_id['user_group']]['max_pm'] AND $member_id['pm_all'] >= $user_group[$member_id['user_group']]['max_pm'] AND ! $stop_pm ) {
+	msgbox( $lang['all_info'], $lang['pm_err_9'] );
+}
+
+
+if( $user_group[$member_id['user_group']]['max_pm_day'] AND ( isset( $_POST['send'] ) OR $doaction == "newpm" ) ) {
+
+	$this_time = time() - 86400;
+	$db->query( "DELETE FROM " . PREFIX . "_sendlog WHERE date < '$this_time' AND flag='1'" );
+
+	$row = $db->super_query("SELECT COUNT(*) as count FROM " . PREFIX . "_sendlog WHERE user = '{$member_id['name']}' AND flag='1'");
+
+	if( $row['count'] >=  $user_group[$member_id['user_group']]['max_pm_day'] ) {
+
+		msgbox( $lang['all_err_1'], str_replace('{max}', $user_group[$member_id['user_group']]['max_pm_day'], $lang['pm_err_10']) );
+		$stop_pm = TRUE;
+	}
+}
+
+
+if( $doaction == "del" AND !$stop_pm AND isset($_POST['selected_pm']) AND count($_POST['selected_pm']) ) {
+
+	if( $_REQUEST['dle_allow_hash'] == "" or $_REQUEST['dle_allow_hash'] != $dle_login_hash ) {
+		
+		die( "Hacking attempt! User ID not valid" );
 	
-		$this_time = time() - 86400;
-		$db->query( "DELETE FROM " . PREFIX . "_sendlog WHERE date < '$this_time' AND flag='1'" );
-	
-		$row = $db->super_query("SELECT COUNT(*) as count FROM " . PREFIX . "_sendlog WHERE user = '{$member_id['name']}' AND flag='1'");
-	
-		if( $row['count'] >=  $user_group[$member_id['user_group']]['max_pm_day'] ) {
-			$lang['pm_err_10'] = str_replace('{max}', $user_group[$member_id['user_group']]['max_pm_day'], $lang['pm_err_10']);
-			echo "{\"error\":\" {$lang['pm_err_10']}\"}";
-			die();
+	}
+
+	$delete_count = 0;
+
+	foreach ( $_POST['selected_pm'] as $pmid ) {
+			
+		$pmid = intval( $pmid );
+		$row = $db->super_query( "SELECT id, user, user_from, pm_read, folder FROM " . USERPREFIX . "_pm where id= '{$pmid}'" );
+			
+		if( ($row['user'] == $member_id['user_id'] AND $row['folder'] == "inbox") OR ($row['user_from'] == $member_id['name'] AND $row['folder'] == "outbox") ) {
+			$db->query( "DELETE FROM " . USERPREFIX . "_pm WHERE id='{$row['id']}'" );
+			$delete_count ++;
+				
+			if( !$row['pm_read'] AND $row['folder'] == "inbox" ) {
+				$db->query( "UPDATE " . USERPREFIX . "_users SET pm_unread=pm_unread-1 where user_id='{$member_id['user_id']}'" );
+			}
+				
+			$db->query( "UPDATE " . USERPREFIX . "_users SET pm_all=pm_all-1 where user_id='{$member_id['user_id']}'" );
+			
 		}
+		
 	}
+
+	$member_id['pm_all'] = $member_id['pm_all'] - $delete_count;
+	if( !$delete_count ) msgbox( $lang['all_err_1'], $lang['pm_err_5'] );
+
+}
+
+if( $doaction == "setunread" AND !$stop_pm AND count($_POST['selected_pm']) ) {
+
+	if( $_REQUEST['dle_allow_hash'] == "" or $_REQUEST['dle_allow_hash'] != $dle_login_hash ) {
+		
+		die( "Hacking attempt! User ID not valid" );
+	
+	}
+
+	foreach ( $_POST['selected_pm'] as $pmid ) {
+
+		$pmid = intval( $pmid );
+		$row = $db->super_query( "SELECT id, user, user_from, pm_read, folder FROM " . USERPREFIX . "_pm where id= '{$pmid}'" );
+
+		if( ($row['user'] == $member_id['user_id'] AND $row['folder'] == "inbox") ) {
+
+			if( $row['pm_read'] ) {
+				
+				$db->query( "UPDATE " . USERPREFIX . "_users SET pm_unread=pm_unread+1  WHERE user_id='{$member_id['user_id']}'" );
+				
+				$db->query( "UPDATE " . USERPREFIX . "_pm SET pm_read='0'  WHERE id='{$row['id']}'" );
+			
+			}
+
+		}
+
+	}
+
+}
+
+
+if( $doaction == "setread" AND !$stop_pm AND isset($_POST['selected_pm']) AND count($_POST['selected_pm']) ) {
+
+	if( $_REQUEST['dle_allow_hash'] == "" or $_REQUEST['dle_allow_hash'] != $dle_login_hash ) {
+		
+		die( "Hacking attempt! User ID not valid" );
+	
+	}
+
+	foreach ( $_POST['selected_pm'] as $pmid ) {
+
+		$pmid = intval( $pmid );
+		$row = $db->super_query( "SELECT id, user, user_from, pm_read, folder FROM " . USERPREFIX . "_pm where id= '{$pmid}'" );
+
+		if( ($row['user'] == $member_id['user_id'] AND $row['folder'] == "inbox") ) {
+
+			if( !$row['pm_read'] ) {
+				
+				$db->query( "UPDATE " . USERPREFIX . "_users SET pm_unread=pm_unread-1  WHERE user_id='{$member_id['user_id']}'" );
+				
+				$db->query( "UPDATE " . USERPREFIX . "_pm SET pm_read='1'  WHERE id='{$row['id']}'" );
+			
+			}
+
+		}
+
+	}
+
+}
+
+$tpl->load_template( 'pm.tpl' );
+
+$tpl->set( '[inbox]', "<a href=\"$PHP_SELF?do=pm&amp;folder=inbox\">" );
+$tpl->set( '[/inbox]', "</a>" );
+$tpl->set( '[outbox]', "<a href=\"$PHP_SELF?do=pm&amp;folder=outbox\">" );
+$tpl->set( '[/outbox]', "</a>" );
+$tpl->set( '[new_pm]', "<a href=\"$PHP_SELF?do=pm&amp;doaction=newpm\">" );
+$tpl->set( '[/new_pm]', "</a>" );
+
+if ( $user_group[$member_id['user_group']]['max_pm'] ) {
+
+	$prlim = intval( ($member_id['pm_all'] / $user_group[$member_id['user_group']]['max_pm']) * 100 );
+
+	if ($prlim > 100) $prlim = 100;
+
+	$tpl->set( '{proc-pm-limit}', $prlim );
+	$tpl->set( '{pm-limit}', $user_group[$member_id['user_group']]['max_pm'] );
+
+} else {
+	$prlim = 0;
+	$tpl->set( '{proc-pm-limit}', $prlim );
+	$tpl->set( '{pm-limit}', $lang['no_pm_limit'] );
+}
+
+$tpl->set( '{pm-progress-bar}', "<div class=\"pm_progress_bar\" title=\"{$lang['pm_progress_bar']} {$prlim}%\"><span style=\"width: {$prlim}%\">{$prlim}%</span></div>" );
+
+if( isset( $_POST['send'] ) and !$stop_pm ) {
 	
 	$name = $db->safesql( htmlspecialchars(strip_tags( trim( $_POST['name'] ) ), ENT_QUOTES, $config['charset'] ) );
 	$subj = $db->safesql( htmlspecialchars(strip_tags( trim( $_POST['subj'] ) ), ENT_QUOTES, $config['charset'] ) );
@@ -81,6 +219,18 @@ if ($_POST['action'] == "send_pm") {
 	if( dle_strlen( $_POST['comments'], $config['charset'] ) > 65000 ) $_POST['comments'] = "";
 	
 	$stop = "";
+	$go_back = "";
+	
+	if( !isset($_REQUEST['user_hash']) OR !$_REQUEST['user_hash'] OR $_REQUEST['user_hash'] != $dle_login_hash ) {
+		$stop .= "<li>" . $lang['sess_error'] . "</li>";
+		$stop_pm = true;
+	}
+
+	if( !isset($_POST['duplicateprotection']) OR (isset($_SESSION['dp']['dp_'.md5($_POST['duplicateprotection'])]) AND $_SESSION['dp']['dp_'.md5($_POST['duplicateprotection'])] === true ) ) {
+		$stop .= "<li>" . $lang['duplicate_protect'] . "</li>";
+		$stop_pm = true;
+		$go_back = "<a href=\"{$PHP_SELF}?do=pm\">{$lang['all_prev']}</a>";
+	}
 	
 	if( $config['allow_comments_wysiwyg'] > 0 ) {
 			
@@ -96,8 +246,9 @@ if ($_POST['action'] == "send_pm") {
 		
 		$comments = $db->safesql( $parse->BB_Parse( $parse->process( trim( $_POST['comments'] ) ), false ) );
 	}
+
 	
-	if(!$name OR !$subj OR !$comments) $stop .= $lang['pm_err_2'];
+	if( empty( $name ) or empty( $subj ) or $comments == "" ) $stop .= $lang['pm_err_2'];
 	
 	if( dle_strlen( $subj, $config['charset'] ) > 250 ) {
 		$stop .= $lang['pm_err_3'];
@@ -124,11 +275,11 @@ if ($_POST['action'] == "send_pm") {
 			$sec_code = 1;
 			$sec_code_session = false;
 
-			if ( $_POST['g_recaptcha_response'] ) {
+			if ( $_POST['g-recaptcha-response'] ) {
 			
 					$reCaptcha = new ReCaptcha($config['recaptcha_private_key']);
 
-					$resp = $reCaptcha->verifyResponse(get_ip(), $_POST['g_recaptcha_response'] );
+					$resp = $reCaptcha->verifyResponse(get_ip(), $_POST['g-recaptcha-response'] );
 			
 			        if ($resp === null OR !$resp->success) {
 
@@ -138,7 +289,7 @@ if ($_POST['action'] == "send_pm") {
 
 			} else $stop .= "<li>" . $lang['recaptcha_fail'] . "</li>";
 
-		} elseif( $_REQUEST['sec_code'] != $_SESSION['sec_code_session'] OR !$_SESSION['sec_code_session'] ) $stop .= "<li>" . $lang['news_err_30'] . "</li>";
+		} elseif( $_REQUEST['sec_code'] != $_SESSION['sec_code_session'] OR !$_SESSION['sec_code_session'] ) $stop .= "<li>" . $lang['recaptcha_fail'] . "</li>";
 	
 	}
 
@@ -179,12 +330,16 @@ if ($_POST['action'] == "send_pm") {
 		} else $stop .= "<li>".$lang['reg_err_24']."</li>";
 	
 	}
-	
+
 	if( !$stop AND $user_group[$member_id['user_group']]['spampmfilter'] ) {
 		
 		$row = $db->super_query( "SELECT * FROM " . PREFIX . "_spam_log WHERE ip = '{$_IP}'" );
 		$member_id['email'] = $db->safesql($member_id['email']);
-
+		
+		$row['id'] = isset($row['id']) ? $row['id'] : false;
+		$row['email'] = isset($row['email']) ? $row['email'] : false;
+		$row['is_spammer'] = isset($row['is_spammer']) ? $row['is_spammer'] : false;
+		
 		if ( !$row['id'] OR !$row['email'] ) {
 	
 			$sfs = new StopSpam($config['spam_api_key'], $user_group[$member_id['user_group']]['spampmfilter'] );
@@ -210,13 +365,9 @@ if ($_POST['action'] == "send_pm") {
 				
 			}
 		
-		} else {
+		} elseif ($row['is_spammer']) {
 	
-			if ($row['is_spammer']) {
-	
-				$stop .= $lang['reg_err_34'];
-			
-			}
+			$stop .= $lang['reg_err_34'];
 	
 		}
 	
@@ -231,9 +382,8 @@ if ($_POST['action'] == "send_pm") {
 		$row = $db->get_row();
 		$db->free();
 		
-		if(!$user_group[$row['user_group']]['allow_pm'] ) {
-			echo "{\"error\":\" {$lang['pm_err_11']}\"}";
-			die();
+		if(!$stop AND !$user_group[$row['user_group']]['allow_pm'] ) {
+			$stop .= "<li>".$lang['pm_err_11']."</li>";
 		}
 	
 	}
@@ -252,8 +402,8 @@ if ($_POST['action'] == "send_pm") {
 	
 	if( !$stop ) {
 		
-		unset($_SESSION['question']);
-		unset($_SESSION['sec_code_session']);
+		$_SESSION['sec_code_session'] = 0;
+		$_SESSION['dp']['dp_'.md5($_POST['duplicateprotection'])] = true;
 		
 		$time = time();
 		$member_id['name'] = $db->safesql($member_id['name']);
@@ -322,503 +472,717 @@ if ($_POST['action'] == "send_pm") {
 		
 		}
 		
-		echo "{\"success\": \"{$lang['pm_sendok']}\"}";
-		die();
+		msgbox( $lang['all_info'], $lang['pm_sendok'] . " <a href=\"$PHP_SELF?do=pm&amp;doaction=newpm\">" . $lang['pm_noch'] . "</a> " . $lang['pm_or'] . " <a href=\"$PHP_SELF\">" . $lang['pm_main'] . "</a>" );
+		$stop_pm = TRUE;
+	
+	} else msgbox( $lang['all_err_1'], "<ul>{$stop}</ul>{$go_back}" );
+
+}
+
+if( $doaction == "del" AND !$stop_pm AND isset($_GET['pmid']) ) {
+	
+	if( $_REQUEST['dle_allow_hash'] == "" or $_REQUEST['dle_allow_hash'] != $dle_login_hash ) {
+		
+		die( "Hacking attempt! User ID not valid" );
+	
+	}
+	
+	$pmid = intval( $_GET['pmid'] );
+	$row = $db->super_query( "SELECT id, user, user_from, pm_read, folder FROM " . USERPREFIX . "_pm where id= '{$pmid}'" );
+		
+	if( ($row['user'] == $member_id['user_id'] AND $row['folder'] == "inbox") OR ($row['user_from'] == $member_id['name'] AND $row['folder'] == "outbox") ) {
+		$db->query( "DELETE FROM " . USERPREFIX . "_pm WHERE id='{$row['id']}'" );
 			
-	} else {
-		echo "{\"error\": \"<ul>{$stop}</ul>\"}";
-		die();
-	}
-	
-
-} elseif ($_GET['action'] == "show_send") {
-
-	$name = htmlspecialchars(strip_tags( trim( urldecode($_GET['name'] ) ) ), ENT_QUOTES, $config['charset'] );
-	
-	if(!$user_group[$member_id['user_group']]['allow_pm'] ) {
-		echo "<div id='dlesendpmpopup' title='{$lang['send_pm']} {$name}' style='display:none'><script>DLEPush.error ( '{$lang['pm_err_1']}' );$('#dlesendpmpopup').remove();</script></div>";
-		die();
-	}
-	
-	if( $user_group[$member_id['user_group']]['max_pm_day'] ) {
-	
-		$this_time = time() - 86400;
-		$db->query( "DELETE FROM " . PREFIX . "_sendlog WHERE date < '$this_time' AND flag='1'" );
-	
-		$row = $db->super_query("SELECT COUNT(*) as count FROM " . PREFIX . "_sendlog WHERE user = '{$member_id['name']}' AND flag='1'");
-	
-		if( $row['count'] >=  $user_group[$member_id['user_group']]['max_pm_day'] ) {
-			$lang['pm_err_10'] = str_replace('{max}', $user_group[$member_id['user_group']]['max_pm_day'], $lang['pm_err_10']);
-			echo "<div id='dlesendpmpopup' title='{$lang['send_pm']} {$name}' style='display:none'><script>DLEPush.error ( '{$lang['pm_err_10']}' );$('#dlesendpmpopup').remove();</script></div>";
-			die();
+		if( !$row['pm_read'] AND $row['folder'] == "inbox" ) {
+			$db->query( "UPDATE " . USERPREFIX . "_users SET pm_unread=pm_unread-1 WHERE user_id='{$member_id['user_id']}'" );
 		}
-	}
+			
+		$db->query( "UPDATE " . USERPREFIX . "_users SET pm_all=pm_all-1 WHERE user_id='{$member_id['user_id']}'" );
 
-	$user_group[$member_id['user_group']]['allow_up_image'] = false;
-	$user_group[$member_id['user_group']]['video_comments'] = false;
-	$user_group[$member_id['user_group']]['media_comments'] = false;
-	$text = "";
-	$comments_image_uploader_loaded = false;
-	
-	$id = 0;
-
-	$response = "<input type=\"hidden\" name=\"pm_name\" id=\"pm_name\" value=\"{$name}\">";
-	$response .= "<div style=\"padding-bottom:5px;\"><input type=\"text\" name=\"pm_subj\" id=\"pm_subj\" class=\"quick-edit-text\" placeholder=\"{$lang['send_pm_1']}\" /></div>";
-	
-	if( $config['allow_comments_wysiwyg'] < 1) {
-
-		include_once (DLEPlugins::Check(ENGINE_DIR . '/ajax/bbcode.php'));
-
-		if ( $config['allow_comments_wysiwyg'] == 0 ) $params = "onfocus=\"setNewField(this.name, document.getElementById( 'dle-send-pm' ) )\"";
-		else $params = "";
+		msgbox( $lang['all_info'], $lang['pm_delok'] . " <a href=\"$PHP_SELF?do=pm\">" . $lang['all_prev'] . "</a>." );
 		
-		$box_class = "bb-editor";
+	} else msgbox( $lang['all_err_1'], $lang['pm_err_5'] );
 
 
+} elseif( $doaction == "readpm" AND !$stop_pm ) {
+	
+	$pmid = intval( $_GET['pmid'] );
+	
+	$tpl->set( '[readpm]', "" );
+	$tpl->set( '[/readpm]', "" );
+	$tpl->set_block( "'\\[pmlist\\].*?\\[/pmlist\\]'si", "" );
+	$tpl->set_block( "'\\[newpm\\].*?\\[/newpm\\]'si", "" );
+	
+	$db->query( "SELECT id, subj, text, user, user_from, date, pm_read, folder, sendid, user_id, news_num, comm_num, user_group, lastdate, reg_date, signature, foto, fullname, land, xfields FROM " . USERPREFIX . "_pm LEFT JOIN " . USERPREFIX . "_users ON " . USERPREFIX . "_pm.user_from=" . USERPREFIX . "_users.name WHERE " . USERPREFIX . "_pm.id= '$pmid'" );
+	$row = $db->get_row();
+	
+	if( $db->num_rows() < 1 ) {
+		
+		msgbox( $lang['all_err_1'], $lang['pm_err_6'] );
+		$stop_pm = TRUE;
+	
+	} elseif( $row['user'] != $member_id['user_id'] AND $row['user_from'] != $member_id['name'] ) {
+		
+		msgbox( $lang['all_err_1'], $lang['pm_err_7'] );
+		$stop_pm = TRUE;
+	
 	} else {
 		
-		$params = "class=\"ajaxwysiwygeditor\"";
-		$box_class = "wseditor dlecomments-editor";
-
-		if ($config['allow_comments_wysiwyg'] == "1") {	
-
-			if( $user_group[$member_id['user_group']]['allow_url'] ) $link_icon = "'insertLink', 'dleleech',"; else $link_icon = "";
+		if( $row['user'] == $member_id['user_id'] AND !$row['pm_read'] AND $row['folder'] == "inbox" ) {
 			
-			if ($user_group[$member_id['user_group']]['allow_image']) {
-				if($config['bbimages_in_wysiwyg']) $link_icon .= "'dleimg',"; else $link_icon .= "'insertImage',";
-			}
-			
-		$bb_code = <<<HTML
-<script>
+			$db->query( "UPDATE " . USERPREFIX . "_users SET pm_unread=pm_unread-1  WHERE user_id='{$member_id['user_id']}'" );
 
-      $('.ajaxwysiwygeditor').froalaEditor({
-        dle_root: dle_root,
-        width: '100%',
-        height: '220',
-        zIndex: 9990,
-        language: '{$lang['language_code']}',
-		direction: '{$lang['direction']}',
+			if ( $row['sendid'] ) $addwhere =" OR id='{$row['sendid']}'"; else $addwhere ="";
 
-		htmlAllowedTags: ['div', 'span', 'p', 'br', 'strong', 'em', 'ul', 'li', 'ol', 'b', 'u', 'i', 's', 'a', 'img'],
-		htmlAllowedAttrs: ['class', 'href', 'alt', 'src', 'style', 'target', 'data-username', 'data-userurl', 'data-commenttime', 'data-commentuser', 'contenteditable'],
-		pastePlain: true,
-        imagePaste: false,
-        imageUpload: false,
-		quickInsertEnabled: false,
-		videoInsertButtons: ['videoBack', '|', 'videoByURL'],
+			$db->query( "UPDATE " . USERPREFIX . "_pm SET pm_read='1' WHERE id='{$row['id']}'{$addwhere}" );
 		
-        toolbarButtonsXS: ['bold', 'italic', 'underline', 'strikeThrough', '|', 'align', 'formatOL', 'formatUL', '|', {$link_icon} 'emoticons', '|', 'dlehide', 'dlequote', 'dlespoiler'],
+		}
 
-        toolbarButtonsSM: ['bold', 'italic', 'underline', 'strikeThrough', '|', 'align', 'formatOL', 'formatUL', '|', {$link_icon} 'emoticons', '|', 'dlehide', 'dlequote', 'dlespoiler'],
+		if( strpos( $tpl->copy_template, "[xfvalue_" ) !== false ) $xfound = true;
+		else $xfound = false;
+		
+		if( $xfound ) { 
 
-        toolbarButtonsMD: ['bold', 'italic', 'underline', 'strikeThrough', '|', 'align', 'formatOL', 'formatUL', '|', {$link_icon} 'emoticons', '|', 'dlehide', 'dlequote', 'dlespoiler'],
+			$xfields = xfieldsload( true );
 
-        toolbarButtons: ['bold', 'italic', 'underline', 'strikeThrough', '|', 'align', 'formatOL', 'formatUL', '|', {$link_icon} 'emoticons', '|', 'dlehide', 'dlequote', 'dlespoiler']
+			$xfieldsdata = xfieldsdataload( $row['xfields'] );
+				
+			foreach ( $xfields as $value ) {
+				$preg_safe_name = preg_quote( $value[0], "'" );
+					
+				if( $value[5] != 1 OR $member_id['user_group'] == 1 OR ($is_logged AND $member_id['name'] == $row['user_from']) ) {
+					if( empty( $xfieldsdata[$value[0]] ) ) {
+						$tpl->copy_template = preg_replace( "'\\[xfgiven_{$preg_safe_name}\\](.*?)\\[/xfgiven_{$preg_safe_name}\\]'is", "", $tpl->copy_template );
+					} else {
+						$tpl->copy_template = preg_replace( "'\\[xfgiven_{$preg_safe_name}\\](.*?)\\[/xfgiven_{$preg_safe_name}\\]'is", "\\1", $tpl->copy_template );
+					}
+					$tpl->set( "[xfvalue_{$value[0]}]", stripslashes( $xfieldsdata[$value[0]] ));
+				} else {
+					$tpl->copy_template = preg_replace( "'\\[xfgiven_{$preg_safe_name}\\](.*?)\\[/xfgiven_{$preg_safe_name}\\]'is", "", $tpl->copy_template );
+					$tpl->copy_template = preg_replace( "'\\[xfvalue_{$preg_safe_name}\\]'i", "", $tpl->copy_template );
+				}
+			}
+		}
 
-      });
-	  
-</script>
-HTML;
+		if( $row['signature'] and $user_group[$row['user_group']]['allow_signature'] ) {
+				
+			$tpl->set_block( "'\\[signature\\](.*?)\\[/signature\\]'si", "\\1" );
+			$tpl->set( '{signature}', stripslashes( $row['signature'] ) );
+			
+		} else {
+			$tpl->set_block( "'\\[signature\\](.*?)\\[/signature\\]'si", "" );
+		}
+
+
+		if( $user_group[$row['user_group']]['icon'] ) $tpl->set( '{group-icon}', "<img src=\"" . $user_group[$row['user_group']]['icon'] . "\" border=\"0\" alt=\"\" />" );
+		else $tpl->set( '{group-icon}', "" );
+
+		$tpl->set( '{group-name}', $user_group[$row['user_group']]['group_prefix'].$user_group[$row['user_group']]['group_name'].$user_group[$row['user_group']]['group_suffix'] );
+
+		$tpl->set( '{news-num}', number_format($row['news_num'], 0, ',', ' ') );
+		$tpl->set( '{comm-num}', number_format($row['comm_num'], 0, ',', ' ') );
+
+		if ( $row['foto'] AND count(explode("@", $row['foto'])) == 2 ) {
+		
+			$tpl->set( '{foto}', 'https://www.gravatar.com/avatar/' . md5(trim($row['foto'])) . '?s=' . intval($user_group[$row['user_group']]['max_foto']) );	
+		
+		} else {
+			
+			if( $row['foto'] ) {
+				
+				if (strpos($row['foto'], "//") === 0) $avatar = "http:".$row['foto']; else $avatar = $row['foto'];
+	
+				$avatar = @parse_url ( $avatar );
+	
+				if( $avatar['host'] ) {
+					
+					$tpl->set( '{foto}', $row['foto'] );
+					
+				} else $tpl->set( '{foto}', $config['http_home_url'] . "uploads/fotos/" . $row['foto'] );
+			
+			} else $tpl->set( '{foto}', "{THEME}/dleimages/noavatar.png" );
+		
+		}
+
+		$tpl->set('{date}', difflangdate($config['timestamp_comment'], $row['date']));
+
+		$news_date = $row['date'];
+		$tpl->copy_template = preg_replace_callback("#\{date=(.+?)\}#i", "formdate", $tpl->copy_template);
+
+		if($row['reg_date'] ) {
+
+			$tpl->set( '{registration}', difflangdate("j F Y, H:i", $row['reg_date'] ) );
+
+			$news_date = $row['reg_date'];
+			$tpl->copy_template = preg_replace_callback("#\{registration=(.+?)\}#i", "formdate", $tpl->copy_template);
+		
+		} else $tpl->set( '{registration}', '--' );
+
+		if ( $row['lastdate'] ) {
+
+			$tpl->set('{lastdate}', difflangdate("j F Y, H:i", $row['lastdate']));
+
+			$news_date = $row['lastdate'];
+			$tpl->copy_template = preg_replace_callback("#\{lastdate=(.+?)\}#i", "formdate", $tpl->copy_template);
+
+			if ( ($row['lastdate'] + 1200) > $_TIME ) {
+
+				$tpl->set('[online]', "");
+				$tpl->set('[/online]', "");
+				$tpl->set_block("'\\[offline\\](.*?)\\[/offline\\]'si", "");
+			} else {
+				$tpl->set('[offline]', "");
+				$tpl->set('[/offline]', "");
+				$tpl->set_block("'\\[online\\](.*?)\\[/online\\]'si", "");
+			}
 
 		} else {
 
-			if( $user_group[$member_id['user_group']]['allow_url'] ) $link_icon = "link dleleech "; else $link_icon = "";
-			
-			$mobile_link_icon = $link_icon;
-			
-			if ($user_group[$member_id['user_group']]['allow_image']) {
-				if($config['bbimages_in_wysiwyg']) $link_icon .= "| dleimage "; else $link_icon .= "| dleimage ";
-			}
-			
-			if( @file_exists( ROOT_DIR . '/templates/'. $config['skin'].'/editor.css' ) ) {
-				
-				$editor_css = "templates/{$config['skin']}/editor.css?v={$config['cache_id']}";
-					
-			} else $editor_css = "engine/editor/css/content.css?v={$config['cache_id']}";
-			
-		$bb_code = <<<HTML
+			$tpl->set('{lastdate}', '--');
+			$tpl->set_block("'\\[offline\\](.*?)\\[/offline\\]'si", "");
+			$tpl->set_block("'\\[online\\](.*?)\\[/online\\]'si", "");
+		}
 
+		if( $config['allow_alt_url'] ) {
+			
+			$user_from = $config['http_home_url'] . "user/" . urlencode( $row['user_from'] ) . "/";
+			$user_from = "onclick=\"ShowProfile('" . urlencode( $row['user_from'] ) . "', '" . htmlspecialchars( $user_from, ENT_QUOTES, $config['charset'] ) . "', '" . $user_group[$member_id['user_group']]['admin_editusers'] . "'); return false;\"";
+			$tpl->set( '{author}', "<a {$user_from} class=\"pm_list\" href=\"" . $config['http_home_url'] . "user/" . urlencode( $row['user_from'] ) . "/\">" . $row['user_from'] . "</a>");
+		
+		} else {
+			
+			$user_from = "$PHP_SELF?subaction=userinfo&amp;user=" . urlencode( $row['user_from'] );
+			$user_from = "onclick=\"ShowProfile('" . urlencode( $row['user_from'] ) . "', '" . htmlspecialchars( $user_from, ENT_QUOTES, $config['charset'] ) . "', '" . $user_group[$member_id['user_group']]['admin_editusers'] . "'); return false;\"";
+			$tpl->set( '{author}', "<a {$user_from} class=\"pm_list\" href=\"$PHP_SELF?subaction=userinfo&amp;user=" . urlencode( $row['user_from'] ) . "\">" . $row['user_from'] . "</a>");
+
+		}
+
+		$tpl->set( '{login}', $row['user_from']);
+		$tpl->set( '[reply]', "<a href=\"" . $config['http_home_url'] . "index.php?do=pm&amp;doaction=newpm&amp;replyid=" . $row['id'] . "\">" );
+		$tpl->set( '[/reply]', "</a>" );
+		
+		$tpl->set( '[del]', "<a href=\"javascript:confirmDelete('" . $config['http_home_url'] . "index.php?do=pm&amp;doaction=del&amp;pmid=" . $row['id'] . "&amp;dle_allow_hash=" . $dle_login_hash . "')\">" );
+		$tpl->set( '[/del]', "</a>" );
+
+		$tpl->set( '[ignore]', "<a href=\"javascript:AddIgnorePM('" . $row['user_id'] . "', '" . $lang['add_to_ignore'] . "')\">" );
+		$tpl->set( '[/ignore]', "</a>" );
+
+		$tpl->set( '[complaint]', "<a href=\"javascript:AddComplaint('" . $row['id'] . "', 'pm')\">" );
+		$tpl->set( '[/complaint]', "</a>" );
+
+		$row['text'] = preg_replace ( "#\[hide(.*?)\]#i", "", $row['text'] );
+		$row['text'] = str_ireplace( "[/hide]", "", $row['text']);
+
+		$tpl->set( '{subj}', stripslashes( $row['subj'] ) );
+		$tpl->set( '{text}', stripslashes( $row['text'] ) );
+		
+		$tpl->compile( 'content' );
+
+		$tpl->clear();
+	}
+
+} elseif( $doaction == "newpm" AND !$stop_pm ) {
+	
+	$duplicateprotection = md5(SECURE_AUTH_KEY.time().random_int( 0, 100 ));
+	
+	$ajax_form = <<<HTML
+<span id="dle-pm-preview"></span>
 <script>
+<!--
+function dlePMPreview(){ 
 
-setTimeout(function() {
+	if (dle_wysiwyg == "2") {
 
-	tinymce.remove('textarea.ajaxwysiwygeditor');
+		var pm_text = tinyMCE.get('comments').getContent(); 
 
-	tinyMCE.baseURL = dle_root + 'engine/editor/jscripts/tiny_mce';
-	tinyMCE.suffix = '.min';
+	} else {
 
-	tinymce.init({
-		selector: 'textarea.ajaxwysiwygeditor',
-		language : "{$lang['language_code']}",
-		directionality: '{$lang['direction']}',
-		element_format : 'html',
-		width : "100%",
-		height : 240,
+		var pm_text = document.getElementById('dle-comments-form').comments.value;
 
-		deprecation_warnings: false,
-		promotion: false,
-		cache_suffix: '?v={$config['cache_id']}',
-		
-		plugins: "link image lists quickbars dlebutton codesample",
-		
-		draggable_modal: true,
-		toolbar_mode: 'floating',
-		contextmenu: false,
-		relative_urls : false,
-		convert_urls : false,
-		remove_script_host : false,
-		browser_spellcheck: true,
-		extended_valid_elements : "div[align|style|class|data-commenttime|data-commentuser|contenteditable],span[id|data-username|data-userurl|align|style|class|contenteditable],b/strong,i/em,u,s,p[align|style|class|contenteditable],pre[class],code",
-		quickbars_insert_toolbar: '',
-		quickbars_selection_toolbar: 'bold italic underline | dlequote dlespoiler dlehide',
-		
-	    formats: {
-	      bold: {inline: 'b'},
-	      italic: {inline: 'i'},
-	      underline: {inline: 'u', exact : true},
-	      strikethrough: {inline: 's', exact : true}
-	    },
+	}
 
-		elementpath: false,
-		paste_as_text: true,
-		paste_data_images: false,
-		statusbar : false,
-		branding: false,
+	if(document.getElementById('dle-comments-form').name.value == '' || document.getElementById('dle-comments-form').subj.value == '' || pm_text == '')
+	{
+		DLEPush.error('{$lang['comm_req_f']}');return false;
 
-		dle_root : dle_root,
-		
-		menubar: false,
-		link_default_target: '_blank',
-		editable_class: 'contenteditable',
-		noneditable_class: 'noncontenteditable',
-		image_dimensions: true,
-		
-		toolbar: "bold italic underline | alignleft aligncenter alignright | bullist numlist | dleemo {$link_icon} | dlequote codesample dlespoiler dlehide",
-		
-		mobile: {
-			toolbar_mode: "sliding",
-			toolbar: "bold italic underline | alignleft aligncenter alignright | bullist numlist | {$mobile_link_icon} dlequote dlespoiler dlehide",
-			
-		},
+	}
 
-		setup: (editor) => {
+	var name = document.getElementById('dle-comments-form').name.value;
+	var subj = document.getElementById('dle-comments-form').subj.value;
 
-			const onCompeteAction = (autocompleteApi, rng, value) => {
-				editor.selection.setRng(rng);
-				editor.insertContent(value);
-				autocompleteApi.hide();
-			};
+	ShowLoading('');
 
-			editor.ui.registry.addAutocompleter('getusers', {
-			ch: '@',
-			minChars: 1,
-			columns: 1,
-			onAction: onCompeteAction,
-			fetch: (pattern) => {
+	$.post(dle_root + "engine/ajax/controller.php?mod=pm", { text: pm_text, name: name, subj: subj, skin: dle_skin, user_hash: '{$dle_login_hash}' }, function(data){
 
-				return new Promise((resolve) => {
+		HideLoading('');
 
-					$.get(dle_root + "engine/ajax/controller.php?mod=find_tags", { mode: 'users', term: pattern, skin: dle_skin, user_hash: dle_login_hash }, function(data){
-						if ( data.found ) {
-							resolve(data.items);
-						}
-					}, "json");
+		$("#dle-pm-preview").html(data);
 
-				});
-			}
-			});
-		},
+		$("html,body").stop().animate({scrollTop: $("#dle-pm-preview").position().top - 70}, 1100);
 
-		content_css : dle_root + "{$editor_css}"
+		setTimeout(function() { $("#blind-animation").show('blind',{},1500)}, 1100);
+
 
 	});
 
-	$('#dlesendpmpopup').dialog( "option", "position", { my: "center", at: "center", of: window } );
-	
-}, 100);
-
+};
+//-->
 </script>
 HTML;
-
-
-		}
-	}
-
-	$response .= <<<HTML
-	<div class="{$box_class}">
-		{$bb_code}
-		<textarea name="pm_text" id="pm_text" style="width:100%;height:250px;" {$params}></textarea>
-	</div>
-	<div style="padding-top:5px;">
-		<label class="pm_outbox_copy"><input type="checkbox" name="outboxcopy" id="outboxcopy" value="1">{$lang['send_pm_2']}</label>
-	</div>
-HTML;
-
-	if( $user_group[$member_id['user_group']]['pm_question'] ) {
-		$question = $db->super_query("SELECT id, question FROM " . PREFIX . "_question ORDER BY RAND() LIMIT 1");
 	
-		$_SESSION['question'] = $question['id'];
+	$tpl->set( '[newpm]', $ajax_form );
+	$tpl->set( '[/newpm]', "" );
+	$tpl->set_block( "'\\[pmlist\\].*?\\[/pmlist\\]'si", "" );
+	$tpl->set_block( "'\\[readpm\\].*?\\[/readpm\\]'si", "" );
 	
-		$question = htmlspecialchars( stripslashes( $question['question'] ), ENT_QUOTES, $config['charset'] );
-		
-		$response .= <<<HTML
-	<div id="dle-question" style="padding-top:5px;">{$question}</div>
-	<div><input type="text" name="pm_question_answer" id="pm_question_answer" placeholder="{$lang['question_hint']}" class="quick-edit-text"></div>
-HTML;
-	
-	}
-
 	if( $user_group[$member_id['user_group']]['captcha_pm'] ) {
-	
-		if ( $config['allow_recaptcha'] ) {
 
-			if( $config['allow_recaptcha'] == 2) {
+			if ( $config['allow_recaptcha'] ) {
+
+				$tpl->set( '[recaptcha]', "" );
+				$tpl->set( '[/recaptcha]', "" );
 				
-				$response .= <<<HTML
-		<input type="hidden" name="pm-recaptcha-response" id="pm-recaptcha-response" data-key="{$config['recaptcha_public_key']}" value="">
-		<script>
-		if ( typeof grecaptcha === "undefined"  ) {
-		
-			$.getScript( "https://www.google.com/recaptcha/api.js?render={$config['recaptcha_public_key']}");
-	
-		}
-		</script>
-HTML;
-
-			} elseif($config['allow_recaptcha'] == 3 )  {
+				$captcha_name = "g-recaptcha";
+				$captcha_url = "https://www.google.com/recaptcha/api.js?hl={$lang['language_code']}";
 				
-				$response .= <<<HTML
-		<div id="dle_pm_recaptcha" style="padding-top:5px;height:78px;"></div>
-		<script>
-		<!--
-		var recaptcha_widget;
-		
-		if ( typeof hcaptcha === "undefined"  ) {
-		
-			$.getScript( "https://js.hcaptcha.com/1/api.js?hl={$lang['language_code']}&render=explicit").done(function () {
-			
-				var setIntervalID = setInterval(function () {
-					if (window.hcaptcha) {
-						clearInterval(setIntervalID);
-						recaptcha_widget = hcaptcha.render('dle_pm_recaptcha', {'sitekey' : '{$config['recaptcha_public_key']}', 'theme':'{$config['recaptcha_theme']}'});
-					};
-				}, 300);
-			});
-	
-		} else {
-			recaptcha_widget = hcaptcha.render('dle_pm_recaptcha', {'sitekey' : '{$config['recaptcha_public_key']}', 'theme':'{$config['recaptcha_theme']}'});
-		}
-		//-->
-		</script>
-HTML;
-			} elseif ($config['allow_recaptcha'] == 4) {
+				if( $config['allow_recaptcha'] == 3) {
+					
+					$captcha_name = "h-captcha";
+					$captcha_url = "https://js.hcaptcha.com/1/api.js?hl={$lang['language_code']}";
+				
+				}
 
-				$response .= <<<HTML
-		<div id="dle_pm_recaptcha" style="padding-top:5px;height:78px;"></div>
-		<script>
-		<!--
-		var recaptcha_widget;
-		
-		if ( typeof turnstile === "undefined"  ) {
-		
-			$.getScript( "https://challenges.cloudflare.com/turnstile/v0/api.js?compat=recaptcha&render=explicit").done(function () {
-			
-				var setIntervalID = setInterval(function () {
-					if (window.turnstile) {
-						clearInterval(setIntervalID);
-						recaptcha_widget = turnstile.render('#dle_pm_recaptcha', {'sitekey' : '{$config['recaptcha_public_key']}', 'theme':'{$config['recaptcha_theme']}', 'language':'{$lang['language_code']}'});
-					};
-				}, 300);
-			});
-	
-		} else {
-			recaptcha_widget = turnstile.render('#dle_pm_recaptcha', {'sitekey' : '{$config['recaptcha_public_key']}', 'theme':'{$config['recaptcha_theme']}', 'language':'{$lang['language_code']}'});
-		}
-		//-->
-		</script>
-HTML;
+				if ($config['allow_recaptcha'] == 4) {
+
+					$captcha_name = "cf-turnstile";
+					$captcha_url = "https://challenges.cloudflare.com/turnstile/v0/api.js?compat=recaptcha";
+				}
+
+				if( $config['allow_recaptcha'] == 2) {
+						
+					$tpl->set( '{recaptcha}', "");
+					$tpl->copy_template .= "<script src=\"https://www.google.com/recaptcha/api.js?render={$config['recaptcha_public_key']}\" async defer></script>";
+						
+				} else {
+						
+					$tpl->set( '{recaptcha}', "<div class=\"{$captcha_name}\" data-sitekey=\"{$config['recaptcha_public_key']}\" data-theme=\"{$config['recaptcha_theme']}\" data-language=\"{$lang['language_code']}\"></div><script src=\"{$captcha_url}\" async defer></script>" );
+
+				}
+				$tpl->set_block( "'\\[sec_code\\](.*?)\\[/sec_code\\]'si", "" );
+				$tpl->set( '{sec_code}', "" );
+
 			} else {
-	
-				$response .= <<<HTML
-		<div id="dle_pm_recaptcha" style="padding-top:5px;height:78px;"></div>
-		<script>
-		<!--
-		var recaptcha_widget;
-		
-		if ( typeof grecaptcha === "undefined"  ) {
-		
-			$.getScript( "https://www.google.com/recaptcha/api.js?hl={$lang['language_code']}&render=explicit").done(function () {
-			
-				var setIntervalID = setInterval(function () {
-					if (window.grecaptcha) {
-						clearInterval(setIntervalID);
-						recaptcha_widget = grecaptcha.render('dle_pm_recaptcha', {'sitekey' : '{$config['recaptcha_public_key']}', 'theme':'{$config['recaptcha_theme']}'});
-					};
-				}, 300);
-			});
-	
-		} else {
-			recaptcha_widget = grecaptcha.render('dle_pm_recaptcha', {'sitekey' : '{$config['recaptcha_public_key']}', 'theme':'{$config['recaptcha_theme']}'});
-		}
-		//-->
-		</script>
-HTML;
-	
+
+				$tpl->set( '[sec_code]', "" );
+				$tpl->set( '[/sec_code]', "" );
+				$tpl->set( '{sec_code}', "<a onclick=\"reload(); return false;\" href=\"#\" title=\"{$lang['reload_code']}\"><span id=\"dle-captcha\"><img src=\"engine/modules/antibot/antibot.php\" alt=\"{$lang['reload_code']}\" border=\"0\" width=\"160\" height=\"80\" /></span></a>" );
+				$tpl->set_block( "'\\[recaptcha\\](.*?)\\[/recaptcha\\]'si", "" );
+				$tpl->set( '{recaptcha}', "" );
 			}
-			
-		} else {
-	
-			$response .= <<<HTML
-	<div style="padding-top:5px;" class="dle-captcha"><a onclick="reload_pm(); return false;" title="{$lang['reload_code']}" href="#"><span id="dle-captcha_pm"><img src="{$config['http_home_url']}engine/modules/antibot/antibot.php" alt="{$lang['reload_code']}" width="160" height="80" /></span></a>
-	<input class="ui-widget-content ui-corner-all sec-code" type="text" name="sec_code" id="sec_code_pm" placeholder="{$lang['captcha_hint']}">
-	</div>
-	<script>
-	<!--
-	function reload_pm () {
-	
-		var rndval = new Date().getTime(); 
-	
-		document.getElementById('dle-captcha_pm').innerHTML = '<img src="{$config['http_home_url']}engine/modules/antibot/antibot.php?rndval=' + rndval + '" width="160" height="80" alt="" />';
-		document.getElementById('sec_code_pm').value = '';
-	};
-	//-->
-	</script>
-HTML;
-	
-		}
-	}	
-	
-
-	echo "<div id=\"dlesendpmpopup\" title=\"{$lang['send_pm']} {$name}\" style=\"display:none\"><form  method=\"post\" name=\"dle-send-pm\" id=\"dle-send-pm\">{$response}</form></div>";
-	die();
-
-} else {
-
-	function del_tpl( $matches=array() ) {
-		global $tpl;
-
-		$tpl->copy_template = $matches[1];
-	}
-	
-	$tpl = new dle_template( );
-	$tpl->dir = ROOT_DIR . '/templates/' . $config['skin'];
-	define( 'TEMPLATE_DIR', $tpl->dir );
-	
-	$name = htmlspecialchars(strip_tags( trim( $_POST['name'] ) ), ENT_QUOTES, $config['charset'] );
-	$subj = htmlspecialchars(strip_tags( trim( $_POST['subj'] ) ), ENT_QUOTES, $config['charset'] );
-	
-	if( $config['allow_comments_wysiwyg'] < 1) {
-		
-		if ($config['allow_comments_wysiwyg'] == "-1") $parse->allowbbcodes = false;
-		
-		$text = $parse->BB_Parse( $parse->process( $_POST['text'] ), false );
 
 	} else {
-		
-		$parse->wysiwyg = true;
 
-		$text = $parse->BB_Parse( $parse->process( $_POST['text'] ) );
+		$tpl->set( '{sec_code}', "" );
+		$tpl->set( '{recaptcha}', "" );
+		$tpl->set_block( "'\\[recaptcha\\](.*?)\\[/recaptcha\\]'si", "" );
+		$tpl->set_block( "'\\[sec_code\\](.*?)\\[/sec_code\\]'si", "" );
+
+	}
+
+	if( $user_group[$member_id['user_group']]['pm_question'] ) {
+
+		$tpl->set( '[question]', "" );
+		$tpl->set( '[/question]', "" );
+
+		$question = $db->super_query("SELECT id, question FROM " . PREFIX . "_question ORDER BY RAND() LIMIT 1");
+		$tpl->set( '{question}', "<span id=\"dle-question\">".htmlspecialchars( stripslashes( $question['question'] ), ENT_QUOTES, $config['charset'] )."</span>" );
+
+		$_SESSION['question'] = $question['id'];
+
+	} else {
+
+		$tpl->set_block( "'\\[question\\](.*?)\\[/question\\]'si", "" );
+		$tpl->set( '{question}', "" );
+
 	}
 	
-	$tpl->load_template( 'pm.tpl' );
-	
-	preg_replace_callback( "'\\[readpm\\](.*?)\\[/readpm\\]'is", "del_tpl", $tpl->copy_template );
-	
-			if( strpos( $tpl->copy_template, "[xfvalue_" ) !== false ) $xfound = true;
-			else $xfound = false;
+	if( isset( $_GET['replyid'] ) ) $replyid = intval( $_GET['replyid'] ); else $replyid = false;
+	if( isset( $_GET['user'] ) ) $user = intval( $_GET['user'] ); else $user = false;
+
+	if( isset( $_REQUEST['username'] ) ) $username = $db->safesql( strip_tags( urldecode( $_GET['username'] ) ) );
+	else $username = '';
+
+	$text = "";
+
+	if( $replyid ) {
+		
+		$row = $db->super_query( "SELECT * FROM " . USERPREFIX . "_pm WHERE id= '$replyid'" );
+		
+		if( ($row['user'] != $member_id['user_id']) AND ($row['user_from'] != $member_id['name']) ) {
 			
-			if( $xfound ) { 
+			msgbox( $lang['all_err_1'], $lang['pm_err_7'] );
+			$stop_pm = TRUE;
+		
+		} else {
+			
+			if( $config['allow_comments_wysiwyg'] > 0 ) {
+				
+				$parse->wysiwyg = true;
+				$text = $parse->decodeBBCodes( $row['text'], TRUE, $config['allow_comments_wysiwyg'] );
+				
+				$text = preg_replace('/<p[^>]*>/', '', $text); 
+				$text = str_replace("</p>", "<br>", $text);	
+				$text = preg_replace('/<div[^>]*>/', '', $text); 
+				$text = str_replace("</div>", "<br>", $text);
+				$text = str_replace( "\r", "", $text );
+				$text = str_replace( "\n", "", $text );
+				
+				$count_start = substr_count ($text, "[quote");
+				$count_end = substr_count ($text, "[/quote]");
+				
+				if ($count_start AND $count_start == $count_end) {
+					$text = str_ireplace( "[quote]", "<div class=\"quote\">", $text );
+					$text = preg_replace( "#\[quote=(.*?)\]#i", "<div class=\"title_quote\">{$lang['i_quote']} \\1</div><div class=\"quote\">", $text );
+					$text = str_ireplace( "[/quote]", "</div>", $text );
+				}
+			
+				$text = trim($text);
 	
-				$xfields = xfieldsload( true );
+				$text = "<div class=\"quote_block noncontenteditable\"><div class=\"quote\"><div class=\"quote_body contenteditable\">{$text}</div></div></div><p></p>";
+			
+			} else {
+				
+				$text = $parse->decodeBBCodes( $row['text'], false );
 	
-				$xfieldsdata = xfieldsdataload( $member_id['xfields'] );
+				$text = str_replace( "&#58;", ":", $text );
+				$text = str_replace( "&#91;", "[", $text );
+				$text = str_replace( "&#93;", "]", $text );
+				$text = str_replace( "&#123;", "{", $text );
+				$text = str_replace( "&#39;", "'", $text );
+				$text = "[quote]" . $text . "[/quote]\n";
+				
+			}
+			
+			$tpl->set( '{author}', $row['user_from'] );
+	
+			if (strpos ( $row['subj'], "RE:" ) === false)
+				$tpl->set( '{subj}', "RE: " . stripslashes( $row['subj'] ) );
+			else
+				$tpl->set( '{subj}', stripslashes( $row['subj'] ) );
+	
+			$row = $db->super_query( "SELECT user_id, pm_all, user_group FROM " . USERPREFIX . "_users WHERE name = '" . $db->safesql( $row['user_from'] ) . "'" );
+			
+			if( $user_group[$row['user_group']]['max_pm'] AND $row['pm_all'] >= $user_group[$row['user_group']]['max_pm'] AND $member_id['user_group'] != 1 ) {
+				$stop_pm = true;
+			}
+			
+		}
+	
+	} elseif( $username != "" ) {
+		
+		$row = $db->super_query( "SELECT user_id, name, pm_all, user_group FROM " . USERPREFIX . "_users where name='{$username}'" );
+		
+		if( $user_group[$row['user_group']]['max_pm'] AND $row['pm_all'] >= $user_group[$row['user_group']]['max_pm'] AND $member_id['user_group'] != 1 ) {
+			$stop_pm = true;
+		}
+		
+		$tpl->set( '{author}', $row['name'] );
+		$tpl->set( '{subj}', "" );
+	
+	} else {
+		$tpl->set( '{author}', "" );
+		$tpl->set( '{subj}', "" );
+	
+	}
+
+	if( $config['allow_comments_wysiwyg'] > 0 ) {
+		
+		include_once (DLEPlugins::Check(ENGINE_DIR . '/editor/comments.php'));
+		$bb_code = "";
+		$allow_comments_ajax = true;
+		
+	} else
+		include_once (DLEPlugins::Check(ENGINE_DIR . '/modules/bbcode.php'));
+
+	if( $config['allow_comments_wysiwyg'] > 0 ) {
+		
+		$tpl->set( '{editor}', $wysiwyg );
+	
+	} else {
+		$tpl->set( '{editor}', $bb_code );
+	}
+	
+	$tpl->copy_template = "<form  method=\"post\" name=\"dle-comments-form\" id=\"dle-comments-form\" action=\"\">\n" . $tpl->copy_template . "<input name=\"send\" type=\"hidden\" value=\"send\" /><input type=\"hidden\" name=\"user_hash\" value=\"{$dle_login_hash}\"><input type=\"hidden\" name=\"duplicateprotection\" value=\"{$duplicateprotection}\"></form>";
+
+		
+		$onload_scripts[] = <<<HTML
+		
+			$('#dle-comments-form').submit(function(event) {
+			
+				
+				if (dle_wysiwyg == "2") {
+					tinyMCE.triggerSave();
+				}
+				
+				if( document.getElementById('dle-comments-form').name.value == '' || document.getElementById('dle-comments-form').subj.value == '' || document.getElementById('comments').value == '') {
+					DLEPush.error('{$lang['comm_req_f']}');
+					return false;
+				}
+			
+				if(dle_captcha_type == 2 && typeof grecaptcha != "undefined") {
+				
+					event.preventDefault();
 					
-				foreach ( $xfields as $value ) {
-					$preg_safe_name = preg_quote( $value[0], "'" );
+					grecaptcha.execute('{$config['recaptcha_public_key']}', {action: 'personal_message'}).then(function(token) {
+						$('#dle-comments-form').append('<input type="hidden" name="g-recaptcha-response" value="' + token + '">');
+						$('#dle-comments-form').off('submit');
+						HTMLFormElement.prototype.submit.call(document.getElementById('dle-comments-form'));
+					});
+			
+					return false;
+				}
+				
+				return true;
+				
+			});
+HTML;
+
+
+	if (isset($row['user_id']) AND $row['user_id']) {
+
+		$db->query( "SELECT id FROM " . USERPREFIX . "_ignore_list WHERE user='{$row['user_id']}' AND user_from='{$member_id['name']}'" );
+		if( $db->num_rows() ) { $stop_pm = true; $lang['pm_err_8'] = $lang['pm_ignored'];}
+		$db->free();
+
+	}
+
+	if( !$stop_pm ) {
+		
+		$tpl->compile( 'content' );
+		$tpl->clear();
+		
+	} else {
+		
+		$tpl->clear();
+		if( ! $tpl->result['info'] ) msgbox( $lang['all_info'], $lang['pm_err_8'] );
+		
+	}
+
+} elseif( !$stop_pm ) {
+	
+	$tpl->set( '[pmlist]', "" );
+	$tpl->set( '[/pmlist]', "" );
+	$tpl->set_block( "'\\[newpm\\].*?\\[/newpm\\]'si", "" );
+	$tpl->set_block( "'\\[readpm\\].*?\\[/readpm\\]'si", "" );
+
+	$pm_per_page = 20;
+	if (isset ( $_GET['cstart'] )) $cstart = intval ( $_GET['cstart'] ); else $cstart = 0;
+
+	if ($cstart) {
+		$cstart = $cstart - 1;
+		$cstart = $cstart * $pm_per_page;
+	}
+
+	if ($cstart < 0) $cstart = 0;
+	
+	if( $member_id['pm_unread'] < 0 ) {
+		
+		$db->query( "UPDATE " . USERPREFIX . "_users SET pm_unread='0' WHERE user_id='{$member_id['user_id']}'" );
+	
+	}
+	
+	$pmlist = <<<HTML
+<form action="" method="post" name="pmlist" id="pmlist">
+<input type="hidden" name="dle_allow_hash" value="{$dle_login_hash}" />
+HTML;
+	
+	if( isset($_GET['folder']) AND $_GET['folder'] == "outbox" ) {
+
+		$lang['pm_from'] = $lang['pm_to'];
+		$sql = "SELECT id, subj, name as user_from, date, pm_read FROM " . USERPREFIX . "_pm LEFT JOIN " . USERPREFIX . "_users ON " . USERPREFIX . "_pm.user=" . USERPREFIX . "_users.user_id WHERE user_from = '{$member_id['name']}' AND folder = 'outbox' ORDER BY date DESC LIMIT " . $cstart . "," . $pm_per_page;
+		$sql_count = "SELECT COUNT(*) as count FROM " . USERPREFIX . "_pm WHERE user_from = '{$member_id['name']}' AND folder = 'outbox'";
+		$user_query = "do=pm&amp;folder=outbox";
+
+	} else {
+
+		$sql = "SELECT id, subj, user_from, date, pm_read, reply FROM " . USERPREFIX . "_pm where user = '{$member_id['user_id']}' AND folder = 'inbox' ORDER BY pm_read ASC, date DESC LIMIT " . $cstart . "," . $pm_per_page;
+		$sql_count = "SELECT COUNT(*) as count FROM " . USERPREFIX . "_pm where user = '{$member_id['user_id']}' AND folder = 'inbox'";
+		$user_query = "do=pm";
+	}
+	
+	$pmlist .= "<table class=\"pm\" style=\"width:100%;\"><tr><td width=\"20\">&nbsp;</td><td class=\"pm_head\">" . $lang['pm_subj'] . "</td><td width=\"130\" class=\"pm_head\">" . $lang['pm_from'] . "</td><td width=\"130\" class=\"pm_head\" align=\"center\">" . $lang['pm_date'] . "</td><td width=\"50\" class=\"pm_head\" align=\"center\"><input type=\"checkbox\" name=\"master_box\" title=\"{$lang['pm_selall']}\" onclick=\"javascript:ckeck_uncheck_all()\" /></td></tr>";
+	
+	$db->query( $sql );
+	$i = 0;
+	$cc = $cstart;
+	
+	while ( $row = $db->get_row() ) {
+		
+		$i ++;
+		$cc ++;
+		
+		if( $config['allow_alt_url'] ) {
+			
+			$user_from = $config['http_home_url'] . "user/" . urlencode( $row['user_from'] ) . "/";
+			$user_from = "onclick=\"ShowProfile('" . urlencode( $row['user_from'] ) . "', '" . htmlspecialchars( $user_from, ENT_QUOTES, $config['charset'] ) . "', '" . $user_group[$member_id['user_group']]['admin_editusers'] . "'); return false;\"";
+			$user_from = "<a {$user_from} class=\"pm_list\" href=\"" . $config['http_home_url'] . "user/" . urlencode( $row['user_from'] ) . "/\">" . $row['user_from'] . "</a>";
+		
+		} else {
+			
+			$user_from = "$PHP_SELF?subaction=userinfo&amp;user=" . urlencode( $row['user_from'] );
+			$user_from = "onclick=\"ShowProfile('" . urlencode( $row['user_from'] ) . "', '" . $user_from . "', '" . $user_group[$member_id['user_group']]['admin_editusers'] . "'); return false;\"";
+			$user_from = "<a {$user_from} class=\"pm_list\" href=\"$PHP_SELF?subaction=userinfo&amp;user=" . urlencode( $row['user_from'] ) . "\">" . $row['user_from'] . "</a>";
+
+		}
+		
+		if( $row['pm_read'] ) {
+			
+			$subj = "<a class=\"pm_list\" href=\"$PHP_SELF?do=pm&amp;doaction=readpm&amp;pmid=" . $row['id'] . "\">" . stripslashes( $row['subj'] ) . "</a>";
+			$icon = "{THEME}/dleimages/read.gif";
+			$class = "pm-read-image";
+		
+		} else {
+			
+			$subj = "<a class=\"pm_list\" href=\"$PHP_SELF?do=pm&amp;doaction=readpm&amp;pmid=" . $row['id'] . "\"><b>" . stripslashes( $row['subj'] ) . "</b></a>";
+			$icon = "{THEME}/dleimages/unread.gif";
+			$class = "pm-unread-image";
+		
+		}
+		
+		if( isset($row['reply']) AND $row['reply'] ) {
+			$icon = "{THEME}/dleimages/send.gif";
+			$class = "pm-reply-image";
+		}
+		
+		$pmlist .= "<tr><td><span class=\"{$class}\"><img src=\"{$icon}\" alt=\"\" /></span></td><td class=\"pm_list pm_subj\">{$subj}</td><td class=\"pm_list pm_from\">{$user_from}</td><td class=\"pm_list pm_date\" align=\"center\">" . langdate( "j.m.Y H:i", $row['date'] ) . "</td><td class=\"pm_list pm_checkbox\" align=\"center\"><input name=\"selected_pm[]\" value=\"{$row['id']}\" type=\"checkbox\" /></td></tr>";
+	
+	}
+	
+	$db->free();
+
+	$count_all = $db->super_query( $sql_count );
+	$count_all = $count_all['count'];
+	$pages = "";
+
+	if( $count_all AND $count_all > $pm_per_page) {
+
+		if( isset( $cstart ) and $cstart > 0 ) {
+			$prev = $cstart / $pm_per_page;
+
+				if ($prev == 1)
+					$pages .= "<a href=\"$PHP_SELF?{$user_query}\"> << </a> ";
+				else
+					$pages .= "<a href=\"$PHP_SELF?cstart=$prev&amp;$user_query\"> << </a> ";
+		
+		}
+				
+		$enpages_count = @ceil( $count_all / $pm_per_page );
+				
+		$cstart = ($cstart / $pm_per_page) + 1;
+				
+		if( $enpages_count <= 10 ) {
+					
+			for($j = 1; $j <= $enpages_count; $j ++) {
 						
-					if( $value[5] != 1 OR $member_id['user_group'] == 1 OR ($is_logged AND $member_id['name'] == $row['user_from']) ) {
-						if( empty( $xfieldsdata[$value[0]] ) ) {
-							$tpl->copy_template = preg_replace( "'\\[xfgiven_{$preg_safe_name}\\](.*?)\\[/xfgiven_{$preg_safe_name}\\]'is", "", $tpl->copy_template );
-						} else {
-							$tpl->copy_template = preg_replace( "'\\[xfgiven_{$preg_safe_name}\\](.*?)\\[/xfgiven_{$preg_safe_name}\\]'is", "\\1", $tpl->copy_template );
-						}
-						$tpl->set( "[xfvalue_{$value[0]}]", stripslashes( $xfieldsdata[$value[0]] ) );
-					} else {
-						$tpl->copy_template = preg_replace( "'\\[xfgiven_{$preg_safe_name}\\](.*?)\\[/xfgiven_{$preg_safe_name}\\]'is", "", $tpl->copy_template );
-						$tpl->copy_template = preg_replace( "'\\[xfvalue_{$preg_safe_name}\\]'i", "", $tpl->copy_template );
-					}
+				if( $j != $cstart ) {
+							
+					if ($j == 1)
+						$pages .= "<a href=\"$PHP_SELF?{$user_query}\">$j</a> ";
+					else
+						$pages .= "<a href=\"$PHP_SELF?cstart=$j&amp;$user_query\">$j</a> ";
+						
+				} else {
+					
+					$pages .= "<span>$j</span> ";
 				}
 			}
-	
-			$tpl->set( '{author}', $member_id['name'] );
-			$tpl->set( '[reply]', "<a href=\"#\">" );
-			$tpl->set( '[/reply]', "</a>" );
-			$tpl->set( '[del]', "<a href=\"#\">" );
-			$tpl->set( '[/del]', "</a>" );
-			$tpl->set( '[ignore]', "<a href=\"#\">" );
-			$tpl->set( '[/ignore]', "</a>" );
-			$tpl->set( '[complaint]', "<a href=\"#\">" );
-			$tpl->set( '[/complaint]', "</a>" );
-
-			$tpl->set( '[online]', "" );
-			$tpl->set( '[/online]', "" );
-			$tpl->set_block( "'\\[offline\\](.*?)\\[/offline\\]'si", "" );
-	
-			if( $member_id['signature'] and $user_group[$member_id['user_group']]['allow_signature'] ) {
-					
-				$tpl->set_block( "'\\[signature\\](.*?)\\[/signature\\]'si", "\\1" );
-				$tpl->set( '{signature}', stripslashes( $member_id['signature'] ) );
 				
-			} else {
-				$tpl->set_block( "'\\[signature\\](.*?)\\[/signature\\]'si", "" );
-			}
-	
-			if( $user_group[$member_id['user_group']]['icon'] ) $tpl->set( '{group-icon}', "<img src=\"" . $user_group[$member_id['user_group']]['icon'] . "\" border=\"0\" alt=\"\" />" );
-			else $tpl->set( '{group-icon}', "" );
-	
-			$tpl->set( '{group-name}', $user_group[$member_id['user_group']]['group_prefix'].$user_group[$member_id['user_group']]['group_name'].$user_group[$member_id['user_group']]['group_suffix'] );
-			$tpl->set( '{news-num}', intval( $member_id['news_num'] ) );
-			$tpl->set( '{comm-num}', intval( $member_id['comm_num'] ) );
-
-			if ( count(explode("@", $member_id['foto'])) == 2 ) {
-				$tpl->set( '{foto}', 'https://www.gravatar.com/avatar/' . md5(trim($member_id['foto'])) . '?s=' . intval($user_group[$member_id['user_group']]['max_foto']) );
-			
-			} else {
-			
-				if( $member_id['foto'] ) {
+		} else {
 					
-					if (strpos($member_id['foto'], "//") === 0) $avatar = "http:".$member_id['foto']; else $avatar = $member_id['foto'];
-		
-					$avatar = @parse_url ( $avatar );
-
-					if( $avatar['host'] ) {
+			$start = 1;
+			$end = 10;
+			$nav_prefix = "<span class=\"nav_ext\">{$lang['nav_trennen']}</span> ";
+			
+			if( $cstart > 0 ) {
 						
-						$tpl->set( '{foto}', $member_id['foto'] );
-						
-					} else $tpl->set( '{foto}', $config['http_home_url'] . "uploads/fotos/" . $member_id['foto'] );
+				if( $cstart > 6 ) {
+							
+					$start = $cstart - 4;
+					$end = $start + 8;
+							
+					if( $end >= $enpages_count ) {
+						$start = $enpages_count - 9;
+						$end = $enpages_count - 1;
+						$nav_prefix = "";
+				} else
+						$nav_prefix = "<span class=\"nav_ext\">{$lang['nav_trennen']}</span> ";
 					
-				} else $tpl->set( '{foto}', "{THEME}/dleimages/noavatar.png" );
-		
+				}
+					
 			}
-	
-			$tpl->set( '{date}', "--" );
-	
-			if($member_id['reg_date'] ) $tpl->set( '{registration}', langdate( "j.m.Y", $member_id['reg_date'] ) );
-			else $tpl->set( '{registration}', '--' );
+					
+			if( $start >= 2 ) {
+				
+				$pages .= "<a href=\"$PHP_SELF?{$user_query}\">1</a> <span class=\"nav_ext\">{$lang['nav_trennen']}</span> ";
+			
+			}
+					
+			for($j = $start; $j <= $end; $j ++) {
+						
+				if( $j != $cstart ) {
+					if ($j == 1)
+						$pages .= "<a href=\"$PHP_SELF?{$user_query}\">$j</a> ";
+					else
+						$pages .= "<a href=\"$PHP_SELF?cstart=$j&amp;$user_query\">$j</a> ";
+						
+				} else {
+							
+					$pages .= "<span>$j</span> ";
+				}
+					
+			}
+					
+			if( $cstart != $enpages_count ) {
+						
+				$pages .= $nav_prefix . "<a href=\"$PHP_SELF?cstart={$enpages_count}&amp;$user_query\">{$enpages_count}</a>";
+					
+			} else
+				$pages .= "<span>{$enpages_count}</span> ";
+		
+		}
 
-			$tpl->set( '{subj}', $subj );
-			$tpl->set( '{text}', stripslashes($text) );
+		if( $pm_per_page < $count_all AND $cc < $count_all ) {
+			$next_page = $cc / $pm_per_page + 1;
+			$pages .= "<a href=\"$PHP_SELF?cstart=$next_page&amp;$user_query\"> >> </a>";			
+		
+		}	
+	}
+
+	$pmlist .= "<tr><td colspan=\"5\">&nbsp;</td></tr><tr><td colspan=\"2\"><div class=\"navigation\">{$pages}</div></td><td colspan=\"3\" align=\"right\"><select id=\"pmlist_doaction\"name=\"doaction\"><optgroup label=\"{$lang['edit_selact']}\"><option value=\"\">---</option><option value=\"del\">{$lang['edit_seldel']}</option><option value=\"setread\">{$lang['pm_set_read']}</option><option value=\"setunread\">{$lang['pm_set_unread']}</option></optgroup></select>&nbsp;&nbsp;<input class=\"bbcodes\" type=\"submit\" value=\"{$lang['b_start']}\" /></td></tr></table></form>";
+	
+	if( $i ) {
+		
+		$tpl->set( '{pmlist}', $pmlist );
+
+			$onload_scripts[] = <<<HTML
+$('#pmlist').submit(function() {
+
+	if( $(this).find('#pmlist_doaction').val() == 'del' ) {
+	
+	    DLEconfirm( dle_del_agree, dle_confirm, function () {
+			$('#pmlist').off('submit').submit();
+		} );
+		
+		return false;
+	}
+	
+	return true;
+});
+HTML;
+	
+	} else $tpl->set( '{pmlist}', "<span class=\"pm-no-messages\">".$lang['no_message']."</span>" );
 	
 	$tpl->compile( 'content' );
 	$tpl->clear();
-	
-	$tpl->result['content'] = preg_replace ( "#\[hide(.*?)\]#i", "", $tpl->result['content'] );
-	$tpl->result['content'] = str_ireplace( "[/hide]", "", $tpl->result['content']);
-	$tpl->result['content'] = str_replace( '{THEME}', $config['http_home_url'] . 'templates/' . $config['skin'], $tpl->result['content'] );
-
-	$tpl->result['content'] = "<div id=\"blind-animation\" style=\"display:none\">".$tpl->result['content']."<div>";
-	
-	echo $tpl->result['content'];
 }
-
 ?>

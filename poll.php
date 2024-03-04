@@ -11,125 +11,66 @@
 =====================================================
  File: poll.php
 -----------------------------------------------------
- Use: AJAX for polls in the news
+ Use: polls
 =====================================================
 */
 
-if(!defined('DATALIFEENGINE')) {
+if( !defined('DATALIFEENGINE') ) {
 	header( "HTTP/1.1 403 Forbidden" );
 	header ( 'Location: ../../' );
 	die( "Hacking attempt!" );
 }
 
-if( !isset($_REQUEST['user_hash']) OR !$_REQUEST['user_hash'] OR $_REQUEST['user_hash'] != $dle_login_hash ) {
-	die ("error");
-}
-
-function votes($all, $ansid) {
-	
-	$data = array ();
-	$alldata = array ();
-	
-	if( $all != "" ) {
-		$all = explode( "|", $all );
-		
-		foreach ( $all as $vote ) {
-			list ( $answerid, $answervalue ) = explode( ":", $vote );
-			$data[$answerid] = intval( $answervalue );
-		}
-	}
-	
-	foreach ( $ansid as $id ) {
-		$data[$id] ++;
-	}
-	
-	foreach ( $data as $key => $value ) {
-		$alldata[] = intval( $key ) . ":" . intval( $value );
-	}
-	
-	$alldata = implode( "|", $alldata );
-	
-	return $alldata;
-}
-
-
-$news_id = intval( $_REQUEST['news_id'] );
-$answers = explode( " ", trim( $_REQUEST['answer'] ) );
-
-$buffer = "";
+$_IP = get_ip();
 
 if( $is_logged ) $log_id = intval( $member_id['user_id'] );
 else $log_id = $_IP;
 
-$poll = $db->super_query( "SELECT * FROM " . PREFIX . "_poll WHERE news_id = '{$news_id}'" );
-$log = $db->super_query( "SELECT COUNT(*) as count FROM " . PREFIX . "_poll_log WHERE news_id = '{$news_id}' AND `member` ='{$log_id}'" );
+$poll = $db->super_query( "SELECT * FROM " . PREFIX . "_poll WHERE news_id = '{$row['id']}'" );
 
-if( $log['count'] and $_REQUEST['action'] != "list" ) $_REQUEST['action'] = "results";
+if($config['allow_cache'] AND $dle_module != "showfull") {
 
-if($_REQUEST['action'] != "list" AND !$user_group[$member_id['user_group']]['allow_poll']) $_REQUEST['action'] = "results";
+	$log = array('count' => 0 );
 
-$votes = "";
+} else $log = $db->super_query( "SELECT COUNT(*) as count FROM " . PREFIX . "_poll_log WHERE news_id = '{$row['id']}' AND `member` ='{$log_id}'" );
 
-if( $_REQUEST['action'] == "vote" ) {
+$poll['title'] = stripslashes( $poll['title'] );
+$poll['frage'] = stripslashes( $poll['frage'] );
+$body = str_replace( "<br />", "<br>", $poll['body'] );
+$body = explode( "<br>", stripslashes( $body ) );
+
+$tplpoll = new dle_template();
+$tplpoll->dir = TEMPLATE_DIR;
+
+$tplpoll->load_template( 'poll.tpl' );
+
+$tplpoll->set( '{title}', $poll['title'] );
+$tplpoll->set( '{question}', $poll['frage'] );
+$tplpoll->set( '{votes}', $poll['votes'] );
+$tplpoll->set( '{news-id}', $row['id'] );
+
+if( $log['count'] ) {
 	
-	$votes = votes( $poll['answer'], $answers );
-	$db->query( "UPDATE  " . PREFIX . "_poll set answer='$votes', votes=votes+" . count( $answers ) . " WHERE news_id = '{$news_id}'" );
-	$db->query( "INSERT INTO " . PREFIX . "_poll_log (`news_id`, `member`) VALUES('{$news_id}', '$log_id')" );
+	$tplpoll->set_block( "'\\[not-voted\\](.+?)\\[/not-voted\\]'si", "" );
+	$tplpoll->set( '[voted]', '' );
+	$tplpoll->set( '[/voted]', '' );
+
+} else {
 	
-	$_REQUEST['action'] = "results";
+	$tplpoll->set_block( "'\\[voted\\](.+?)\\[/voted\\]'si", "" );
+	$tplpoll->set( '[not-voted]', '' );
+	$tplpoll->set( '[/not-voted]', '' );
 }
 
-if( $_REQUEST['action'] == "results" ) {
-	
-	if( $votes == "" ) {
-		$votes = $poll['answer'];
-		$allcount = $poll['votes'];
-	} else {
-		$allcount = count( $answers ) + $poll['votes'];
-	}
-	
-	$answer = get_votes( $votes );
-	$body = str_replace( "<br />", "<br>", $poll['body'] );
-	$body = explode( "<br>", stripslashes( $body ) );
-	$pn = 0;
-	
-	for($i = 0; $i < sizeof( $body ); $i ++) {
-		
-		$num = $answer[$i];
-		
-		if( ! $num ) $num = 0;
-		
-		++ $pn;
-		if( $pn > 5 ) $pn = 1;
-		
-		if( $allcount != 0 ) $proc = (100 * $num) / $allcount;
-		else $proc = 0;
+$list = "<div id=\"dle-poll-list-{$row['id']}\">";
 
-		$intproc =intval($proc);		
-		$proc = round( $proc, 2 );
-
-		$buffer .= <<<HTML
-{$body[$i]} - {$num} ({$proc}%)<br />
-<div class="pollprogress"><span class="poll{$pn}" style="width:{$intproc}%;">{$proc}%</span></div>
-HTML;
-	
-	}
-	
-	$buffer .= <<<HTML
-	<div class="pollallvotes">{$lang['poll_count']} {$allcount}</div>
-HTML;
-
-} elseif( $_REQUEST['action'] == "list" ) {
-	
-	$body = str_replace( "<br />", "<br>", $poll['body'] );
-	$body = explode( "<br>", stripslashes( $body ) );
-	
+if( ! $log['count'] and $user_group[$member_id['user_group']]['allow_poll'] ) {
 	if( ! $poll['multiple'] ) {
 		
 		for($v = 0; $v < sizeof( $body ); $v ++) {
-
-			$buffer .= <<<HTML
-<div class="pollanswer"><input id="vote{$news_id}{$v}" name="dle_poll_votes" type="radio" value="{$v}" /><label for="vote{$news_id}{$v}">  {$body[$v]}</label></div>
+			
+			$list .= <<<HTML
+<div class="pollanswer"><input id="vote{$row['id']}{$v}" name="dle_poll_votes" type="radio" value="{$v}"><label for="vote{$row['id']}{$v}"> {$body[$v]}</label></div>
 HTML;
 		
 		}
@@ -137,16 +78,73 @@ HTML;
 		
 		for($v = 0; $v < sizeof( $body ); $v ++) {
 			
-			$buffer .= <<<HTML
-<div class="pollanswer"><input id="vote{$news_id}{$v}" name="dle_poll_votes[]" type="checkbox" value="{$v}" /><label for="vote{$news_id}{$v}">  {$body[$v]}</label></div>
+			$list .= <<<HTML
+<div class="pollanswer"><input id="vote{$row['id']}{$v}" name="dle_poll_votes[]" type="checkbox" value="{$v}"><label for="vote{$row['id']}{$v}">  {$body[$v]}</label></div>
 HTML;
 		
 		}
 	
 	}
+	
+	$allcount = 0;
 
-} else die( "error" );
+} else {
+	
+	$answer = get_votes( $poll['answer'] );
+	$allcount = $poll['votes'];
+	$pn = 0;
+	
+	for($v = 0; $v < sizeof( $body ); $v ++) {
+		
+		$num = $answer[$v];
+		++ $pn;
+		if( $pn > 5 ) $pn = 1;
+		
+		if( ! $num ) $num = 0;
+		
+		if( $allcount != 0 ) $proc = (100 * $num) / $allcount;
+		else $proc = 0;
 
-echo $buffer;
+		$intproc =intval($proc);		
+		$proc = round( $proc, 2 );
+		
+		$list .= <<<HTML
+{$body[$v]} - {$num} ({$proc}%)<br>
+<div class="pollprogress"><span class="poll{$pn}" style="width:{$intproc}%;">{$proc}%</span></div>
+HTML;
+	
+	}
+	
+	$allcount = 1;
+
+}
+
+$list .= "</div>";
+
+$tplpoll->set( '{list}', $list );
+
+if($config['allow_cache']) $allcount = 0;
+
+$ajax_script = <<<HTML
+<script>
+<!--
+if(typeof dle_poll_voted !== "undefined"){
+    dle_poll_voted[{$row['id']}] = {$allcount};
+}
+else{
+	var dle_poll_voted = new Array();
+    dle_poll_voted[{$row['id']}] = {$allcount};
+}
+//-->
+</script>
+HTML;
+
+$tplpoll->copy_template = $ajax_script . "<form method=\"post\" name=\"dlepollform_{$row['id']}\" id=\"dlepollform_{$row['id']}\" action=\"\">" . $tplpoll->copy_template . "<input type=\"hidden\" name=\"news_id\" id=\"news_id\" value=\"" . $row['id'] . "\"><input type=\"hidden\" name=\"status\" id=\"status\" value=\"0\"></form>";
+
+$tplpoll->compile( 'poll' );
+$tplpoll->clear();
+
+$tpl->result['poll'] = $tplpoll->result['poll'];
+unset($tplpoll);
 
 ?>

@@ -11,17 +11,19 @@
 =====================================================
  File: calendar.php
 -----------------------------------------------------
- Use: AJAX for calendar
+ Use: The output of the calendar and archives on site
 =====================================================
 */
 
-if(!defined('DATALIFEENGINE')) {
+if( !defined('DATALIFEENGINE') ) {
 	header( "HTTP/1.1 403 Forbidden" );
 	header ( 'Location: ../../' );
 	die( "Hacking attempt!" );
 }
 
-$PHP_SELF = $config['http_home_url'] . "index.php";
+$is_change = false;
+
+if (!$config['allow_cache']) { $config['allow_cache'] = 1; $is_change = true;}
 
 function cal($cal_month, $cal_year, $events) {
 	global $f, $r, $year, $month, $config, $lang, $langdateshortweekdays, $PHP_SELF;
@@ -59,9 +61,9 @@ function cal($cal_month, $cal_year, $events) {
 	
 	}
 	
-	if( !$next ) $date_link['next'] = "&nbsp;&nbsp;&nbsp;&nbsp;&raquo;";
+	if( ! $next ) $date_link['next'] = "&nbsp;&nbsp;&nbsp;&nbsp;&raquo;";
 	
-	$buffer = '<table id="calendar" class="calendar"><tr><th colspan="7" class="monthselect">' . $date_link['prev'] . langdate( 'F', $first_of_month, true ) . ' ' . $cal_year . $date_link['next'] . '</th></tr><tr>';
+	$buffer = '<div id="calendar-layer"><table id="calendar" class="calendar"><tr><th colspan="7" class="monthselect">' . $date_link['prev'] . langdate( 'F', $first_of_month, true ) . ' ' . $cal_year . $date_link['next'] . '</th></tr><tr>';
 	
 	$buffer = str_replace( $f, $r, $buffer );
 	
@@ -89,7 +91,7 @@ function cal($cal_month, $cal_year, $events) {
 			$date['title'] = langdate( 'd F Y', $events[$cal_day], true );
 			
 			if( $weekday == '5' or $weekday == '6' ) {
-				
+								
 				if( $config['allow_alt_url'] ) $buffer .= '<td '.(($cal_pos==$cur_date)?' class="day-active day-current" ':' class="day-active" ').'><a class="day-active" href="' . $config['http_home_url'] . '' . date( "Y/m/d", $events[$cal_day] ) . '/" title="' . $lang['cal_post'] . ' ' . $date['title'] . '">' . $cal_day . '</a></td>';
 				else $buffer .= '<td '.(($cal_pos==$cur_date)?' class="day-active day-current" ':' class="day-active" ').'><a class="day-active" href="' . $PHP_SELF . '?year=' . date( "Y", $events[$cal_day] ) . '&amp;month=' . date( "m", $events[$cal_day] ) . '&day=' . date( "d", $events[$cal_day] ) . '" title="' . $lang['cal_post'] . ' ' . $date['title'] . '">' . $cal_day . '</a></td>';
 			
@@ -99,9 +101,9 @@ function cal($cal_month, $cal_year, $events) {
 				else $buffer .= '<td '.(($cal_pos==$cur_date)?' class="day-active-v day-current" ':' class="day-active-v" ').'><a class="day-active-v" href="' . $PHP_SELF . '?year=' . date( "Y", $events[$cal_day] ) . '&amp;month=' . date( "m", $events[$cal_day] ) . '&day=' . date( "d", $events[$cal_day] ) . '" title="' . $lang['cal_post'] . ' ' . $date['title'] . '">' . $cal_day . '</a></td>';
 			
 			}
+
 		} else {
 			
-
 			if( $weekday == "5" or $weekday == "6" ) {
 				$buffer .= '<td '.(($cal_pos==$cur_date)?' class="weekday day-current" ':' class="weekday" ').'>' . $cal_day . '</td>';
 			} else {
@@ -117,70 +119,114 @@ function cal($cal_month, $cal_year, $events) {
 		$buffer .= '<td colspan="' . (7 - $weekday) . '">&nbsp;</td>';
 	}
 	
-	return $buffer . '</tr></table>';
+	return $buffer . '</tr></table></div>';
 }
 
-$buffer = false;
-$time = time();
-$thisdate = date( "Y-m-d H:i:s", $time );
-if( $config['no_date'] AND !$config['news_future'] ) $where_date = " AND date < '" . $thisdate . "'"; else $where_date = "";
-
-$this_month = date( 'm', $time );
-$this_year = date( 'Y', $time );
-
-if( isset($_GET['month']) ) {
+if( $config['allow_calendar'] ) {
 	
-	if( intval ( $_GET['month'] ) < 1 OR intval ( $_GET['month'] ) > 12 ) $_GET['month'] = 1;
-	$month = $db->safesql( sprintf("%02d", intval ( $_GET['month'] ) ) );
+	$events = array ();
 	
-} else $month='';
-
-if( isset($_GET['year']) ) {
+	$thisdate = date( "Y-m-d H:i:s", $_TIME );
+	if( $config['no_date'] AND !$config['news_future'] ) $where_date = " AND date < '" . $thisdate . "'";
+	else $where_date = "";
 	
-	if( intval ( $_GET['year'] ) < 1970 ) $_GET['year'] = 1970;
-	if( intval ( $_GET['year'] ) > 2100 ) $_GET['year'] = 2100;
+	$this_month = date( 'm', $_TIME );
+	$this_year = date( 'Y', $_TIME );
+	$sql = "";
 	
-	$year = intval( $_GET['year'] );
+	if( $year != '' AND $month != '' ) $cache_id = $config['skin'] . $month . $year;
+	else $cache_id = $config['skin'] . $this_month . $this_year;
 	
-} else $year='';
+	$tpl->result['calendar'] = dle_cache( "calendar", $cache_id );
+	
+	if( ! $tpl->result['calendar'] ) {
+		
+		if( $year != '' AND $month != '' ) {
 
-$sql = "";
+			$month = totranslit($month, true, false);
 
-if( $year != '' AND $month != '' ) {
+			if( ($year == $this_year and $month < $this_month) or ($year < $this_year) ) {
+				$where_date = "";
+				$approve = "";
+			} else {
+				$approve = " AND approve=1";
+			}
+			
+			$sql = "SELECT DISTINCT DAYOFMONTH(date) as day FROM " . PREFIX . "_post WHERE date >= '{$year}-{$month}-01' AND date < '{$year}-{$month}-01' + INTERVAL 1 MONTH" . $approve . $where_date;
+			
+			$this_month = $month;
+			$this_year = $year;
+		
+		} else {
+			
+			$sql = "SELECT DISTINCT DAYOFMONTH(date) as day FROM " . PREFIX . "_post WHERE date >= '{$this_year}-{$this_month}-01' AND date < '{$this_year}-{$this_month}-01' + INTERVAL 1 MONTH AND approve=1" . $where_date;
+		
+		}
+		
+			
+		$db->query( $sql );
+			
+		while ( $row = $db->get_row() ) {
+			$events[$row['day']] = strtotime( $this_year . "-" . $this_month . "-" . $row['day'] );
+		}
+			
+		$db->free();
 
-	if( ($year == $this_year AND $month < $this_month) OR ($year < $this_year) ) {
-
-		$where_date = "";
-		$approve = "";
-
-	} else {
-		$approve = " AND approve=1";
+		
+		$tpl->result['calendar'] = cal( $this_month, $this_year, $events );
+		create_cache( "calendar", $tpl->result['calendar'], $cache_id );
 	}
-	
-	$sql = "SELECT DISTINCT DAYOFMONTH(date) as day FROM " . PREFIX . "_post WHERE date >= '{$year}-{$month}-01' AND date < '{$year}-{$month}-01' + INTERVAL 1 MONTH" . $approve . $where_date;
-	
-	
-	$this_month = $month;
-	$this_year = $year;
-
-} else {
-	
-	$sql = "SELECT DISTINCT DAYOFMONTH(date) as day FROM " . PREFIX . "_post WHERE date >= '{$this_year}-{$this_month}-01' AND date < '{$this_year}-{$this_month}-01' + INTERVAL 1 MONTH AND approve=1" . $where_date;
 
 }
 
+if( $config['allow_archives'] ) {
 	
-$db->query( $sql );
+	$tpl->result['archive'] = dle_cache( "archives", $config['skin'] );
 	
-while ( $row = $db->get_row() ) {
-	$events[$row['day']] = strtotime( $this_year . "-" . $this_month . "-" . $row['day'] );
+	if( ! $tpl->result['archive'] ) {
+		
+		$f2 = array ('01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12' );
+		$f3 = array ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec' );
+		
+		if( $config['no_date'] AND !$config['news_future'] ) {
+			$thisdate = date( "Y-m-d H:i:s", $_TIME );
+			$where_date = " AND date < '" . $thisdate . "'";
+		} else
+			$where_date = "";
+		
+		$db->query( "SELECT DATE_FORMAT(date,'%b %Y') AS m_date, MAX(date) AS max, COUNT(id) AS cnt FROM " . PREFIX . "_post WHERE approve=1" . $where_date . " GROUP BY m_date ORDER BY max desc" );
+		
+		$news_archive = array ();
+		
+		while ( $row = $db->get_row() ) {
+			
+			$arch_title['ru'] = str_replace( $f3, $r, $row['m_date'] );
+			$arch_title['en'] = str_replace( $f3, $f2, $row['m_date'] );
+			$arch_url = explode( " ", $arch_title['en'] );
+			$arch_title['en'] = $arch_url[1] . "/" . $arch_url[0];
+						
+			if( $config['allow_alt_url'] ) $news_archive[] = '<a class="archives" href="' . $config['http_home_url'] . $arch_title['en'] . '/"><b>' . $arch_title['ru'] . ' (' . $row['cnt'] . ')</b></a>';
+			else $news_archive[] = "<a class=\"archives\" href=\"$PHP_SELF?year=$arch_url[1]&amp;month=$arch_url[0]\"><b>" . $arch_title['ru'] . " (" . $row['cnt'] . ")</b></a>";
+		
+		}
+		
+		$db->free();
+		
+		$i = count( $news_archive );
+		
+		if( $i > 6 ) {
+			$news_archive[6] = "<div id=\"dle_news_archive\" style=\"display:none;\">" . $news_archive[6];
+			$news_archive[] = "</div><div id=\"dle_news_archive_link\" ><br /><a class=\"archives\" onclick=\"$('#dle_news_archive').toggle('blind',{},700); return false;\" href=\"#\">" . $lang['show_archive'] . "</a></div>";
+		}
+		
+		if( $i ) $tpl->result['archive'] = implode( "<br />", $news_archive );
+		else $tpl->result['archive'] = "";
+		
+		create_cache( "archives", $tpl->result['archive'], $config['skin'] );
+	}
+
 }
-	
-$db->free();
-$db->close();
 
-$buffer = cal( $this_month, $this_year, $events );
-
-echo $buffer;
+if ($is_change) $config['allow_cache'] = false;
 
 ?>

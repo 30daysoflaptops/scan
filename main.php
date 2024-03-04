@@ -1,4 +1,4 @@
-<?PHP
+?><?php
 /*
 =====================================================
  DataLife Engine - by SoftNews Media Group 
@@ -10,799 +10,848 @@
  This code is protected by copyright
 =====================================================
  File: main.php
------------------------------------------------------
- Use: Statistics and AutoCheck
 =====================================================
 */
 
-if( !defined( 'DATALIFEENGINE' ) OR !defined( 'LOGGED_IN' ) ) {
+if( !defined('DATALIFEENGINE') ) {
 	header( "HTTP/1.1 403 Forbidden" );
 	header ( 'Location: ../../' );
 	die( "Hacking attempt!" );
 }
 
-echoheader( "<i class=\"fa fa-home position-left\"></i><span class=\"text-semibold\">{$lang['header_m_title']}</span>", $lang['header_m_subtitle'] );
+$home_url = clean_url($config['http_home_url']);
 
-$config['max_users_day'] = intval( $config['max_users_day'] );
+if ($home_url AND clean_url( $_SERVER['HTTP_HOST'] ) != $home_url ) {
 
-$maxmemory = (@ini_get( 'memory_limit' ) != '') ? @ini_get( 'memory_limit' ) : $lang['undefined'];
-$disabledfunctions = (strlen( ini_get( 'disable_functions' ) ) > 1) ? @ini_get( 'disable_functions' ) : $lang['undefined'];
-$disabledfunctions = str_replace( ",", ", ", $disabledfunctions );
-$safemode = (@ini_get( 'safe_mode' ) == 1) ? $lang['safe_mode_on'] : $lang['safe_mode_off'];
-$licence = ($lic_tr) ? $lang['licence_trial'] : $lang['licence_full'];
-$offline = (!$config['site_offline']) ? $lang['safe_mode_on'] : "<span class=\"text-danger\">" . $lang['safe_mode_off'] . "</span>";
+	$replace_url = array ();
+	$replace_url[0] = $home_url;
+	$replace_url[1] = clean_url ( $_SERVER['HTTP_HOST'] );
 
-if( function_exists( 'apache_get_modules' ) ) {
-	if( array_search( 'mod_rewrite', apache_get_modules() ) !== false) {
-		$mod_rewrite = $lang['safe_mode_on'];
-	} else {
-		$mod_rewrite = "<span class=\"text-danger\">" . $lang['safe_mode_off'] . "</span>";
-	}
-} else {
-	$mod_rewrite = $lang['undefined'];
-}
+} else $replace_url = false;
 
-$os_version = @php_uname( "s" ) . " " . @php_uname( "r" );
-$phpv = phpversion();
-$gdversion = false;
+$tpl->load_template ( 'main.tpl' );
 
-if($config['image_driver'] != "2") {
+$tpl->set ( '{calendar}', $tpl->result['calendar'] );
+$tpl->set ( '{archives}', $tpl->result['archive'] );
+$tpl->set ( '{tags}', $tpl->result['tags_cloud'] );
+$tpl->set ( '{vote}', $tpl->result['vote'] );
+$tpl->set ( '{login}', $tpl->result['login_panel'] );
+$tpl->set ( '{speedbar}', $tpl->result['speedbar'] );
+
+if ( $dle_module == "showfull" AND $news_found ) {
 	
-	if(extension_loaded('imagick') && class_exists('Imagick'))	{
+	if( strpos( $tpl->copy_template, "related-news" ) !== false ) {
+		$tpl->set( '[related-news]', "" );
+		$tpl->set( '[/related-news]', "" );
+		$tpl->set( '{related-news}', $related_buffer );
+	}
+	
+	if( strpos( $tpl->copy_template, "[xf" ) !== false OR strpos( $tpl->copy_template, "[ifxf" ) !== false ) {
+
+		$xfieldsdata = xfieldsdataload( $xfieldsdata );
 		
-		$gdversion  =  'imagick';
-		
-		if ( ! \Imagick::queryFormats('WEBP') AND function_exists('imagewebp') AND $config['image_driver'] != "1" ) {
+		foreach ( $xfields as $value ) {
+			$preg_safe_name = preg_quote( $value[0], "'" );
 			
-			$gdversion  =  'gd';
-		
-		}
-
-	} elseif ( function_exists( 'gd_info' ) ) {
-		
-		$gdversion  =  'gd';
-		
-	}
-	
-} elseif ( function_exists( 'gd_info' ) ) {
-	
-	$gdversion  =  'gd';
-	
-}
-
-if( $gdversion  ==  'imagick' ) {
-	
-	$v = Imagick::getVersion();
-	$gdversion = $v['versionString'];
-	
-} elseif ( $gdversion  ==  'gd') {
-	
-	$array=gd_info ();
-	$gdversion = '';
-
-	foreach ($array as $key=>$val) {
-	  
-	  if ($val===true) {
-	    $val="Enabled";
-	  }
-	
-	  if ($val===false) {
-	    $val="Disabled";
-	  }
-	
-	  $gdversion .= $key.":&nbsp;{$val}, ";
-	
-	}
-	
-} else $gdversion = $lang['undefined'];
-
-$maxupload = str_replace( array ('M', 'm' ), '', @ini_get( 'upload_max_filesize' ) );
-$maxupload = formatsize( $maxupload * 1024 * 1024 );
-$stats_arr = array();
-
-if ( $config['allow_cache'] AND !$config['cache_type'] ) {
-
-	$stats_cache = @file_get_contents( ENGINE_DIR . "/cache/news_adminstats.tmp" );
-	if ( $stats_cache !== false ) $stats_arr = json_decode($stats_cache, true);
-	
-	if( !is_array($stats_arr) ) $stats_arr = array();
-}
-
-if ( !count($stats_arr) ) {
-
-	$row = $db->super_query( "SELECT COUNT(*) as count FROM " . PREFIX . "_post" );
-	$stats_arr['stats_news'] = number_format( $row['count'], 0, ',', ' ');
-	
-	$row = $db->super_query( "SELECT COUNT(*) as count FROM " . PREFIX . "_subscribe" );
-	$stats_arr['count_subscribe'] = number_format( $row['count'], 0, ',', ' ');
-	
-	$row = $db->super_query( "SELECT COUNT(*) as count FROM " . PREFIX . "_comments" );
-	$stats_arr['count_comments'] = number_format( $row['count'], 0, ',', ' ');
-	
-	$row = $db->super_query( "SELECT COUNT(*) as count FROM " . PREFIX . "_comments WHERE approve ='0'" );
-	$stats_arr['count_c_app'] = number_format( $row['count'], 0, ',', ' ');
-	
-	$row = $db->super_query( "SELECT COUNT(*) as count FROM " . USERPREFIX . "_users" );
-	$stats_arr['stats_users'] = number_format( $row['count'], 0, ',', ' ');
-	
-	$row = $db->super_query( "SELECT COUNT(*) as count FROM " . USERPREFIX . "_users WHERE banned='yes'" );
-	$stats_arr['stats_banned'] = number_format( $row['count'], 0, ',', ' ');
-	
-	$row = $db->super_query( "SELECT COUNT(*) as count FROM " . PREFIX . "_post where approve = '0'" );
-	$stats_arr['approve']  = number_format( $row['count'], 0, ',', ' ');
-	
-	
-	$db->query( "SHOW TABLE STATUS FROM `" . DBNAME . "`" );
-	$mysql_size = 0;
-	while ( $r = $db->get_array() ) {
-		if( strpos( $r['Name'], PREFIX . "_" ) !== false ) $mysql_size += $r['Data_length'] + $r['Index_length'];
-	}
-	$db->free();
-	
-	$stats_arr['mysql_size'] = formatsize( $mysql_size );
-
-	if ( $config['allow_cache'] AND !$config['cache_type'] ) {
-		file_put_contents (ENGINE_DIR . "/cache/news_adminstats.tmp", json_encode( $stats_arr, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES ), LOCK_EX);
-		@chmod( ENGINE_DIR . "/cache/news_adminstats.tmp", 0666 );
-	}
-
-}
-
-if( $stats_arr['count_c_app'] ) {
-	
-	$stats_arr['count_c_app'] = $stats_arr['count_c_app'] . " [ <a class=\"status-info\" href=\"?mod=cmoderation\">{$lang['stat_cmod_link']}</a> ]";
-
-}
-
-if( $stats_arr['approve'] and $user_group[$member_id['user_group']]['allow_all_edit'] ) {
-	
-	$stats_arr['approve'] = $stats_arr['approve'] . " [ <a class=\"status-info\" href=\"?mod=editnews&action=list&news_status=2\">{$lang['stat_medit_link']}</a> ]";
-
-}
-
-$row = $db->super_query( "SELECT COUNT(*) as count FROM " . PREFIX . "_complaint" );
-$c_complaint = $row['count'];
-set_cookie ( "dle_compl", $row['count'], 365 );
-
-if( $c_complaint AND $user_group[$member_id['user_group']]['admin_complaint'] ) {
-
-	$stored_complaint = isset( $_COOKIE['dle_compl'] ) ? intval($_COOKIE['dle_compl']) : 0;
-
-	$c_complaint = $row['count'] . " [ <a class=\"status-info\" href=\"?mod=complaint\">{$lang['stat_complaint_1']}</a> ]";
-
-	if ($row['count'] > $stored_complaint ) {
-
-		$c_complaint .= <<<HTML
-<script>
-<!--
-
-$(function(){
-	Growl.info({
-		title: '{$lang['p_info']}',
-		text: '{$lang['opt_complaint_20']}'
-	});
-});
-
-//-->
-</script>
-HTML;
-
-	}
-
-
-}
-
-$self_deleted = '';
-
-if ( $user_group[$member_id['user_group']]['admin_editusers']  ) {
-
-	$row = $db->super_query("SELECT COUNT(*) as count FROM " . USERPREFIX . "_users_delete");
-
-	if( $row['count'] ) {
-		$self_deleted = " ({$lang['selfdel_wait_1']} {$row['count']} [ <a href=\"?mod=editusers\">{$lang['opt_s_acc_1']}</a> ] )";
-
-		$self_deleted .= <<<HTML
-<script>
-<!--
-
-$(function(){
-	setTimeout(function() {
-		Growl.warning({
-			title: '{$lang['p_info']}',
-			life: 10000,
-			text: '{$lang['selfdel_wait']}'
-		  });
-	}, 300);
-});
-
-//-->
-</script>
-HTML;
-
-	}
-
-}
-
-function dirsize($directory) {
-	
-	if( ! is_dir( $directory ) ) return - 1;
-	
-	$size = 0;
-	
-	if( $DIR = opendir( $directory ) ) {
-		
-		while ( ($dirfile = readdir( $DIR )) !== false ) {
+			$xfieldsdata[$value[0]] = isset( $xfieldsdata[$value[0]] ) ? stripslashes( $xfieldsdata[$value[0]] ) : '';
 			
-			if( @is_link( $directory . '/' . $dirfile ) || $dirfile == '.' || $dirfile == '..' ) continue;
-			
-			if( @is_file( $directory . '/' . $dirfile ) ) $size += filesize( $directory . '/' . $dirfile );
-			
-			else if( @is_dir( $directory . '/' . $dirfile ) ) {
-				
-				$dirSize = dirsize( $directory . '/' . $dirfile );
-				if( $dirSize >= 0 ) $size += $dirSize;
-				else return - 1;
-			
+			if( $value[20] ) {
+				  
+				$value[20] = explode( ',', $value[20] );
+				  
+				if( $value[20][0] AND !in_array( $member_id['user_group'], $value[20] ) ) {
+					$xfieldsdata[$value[0]] = "";
+				}
+
 			}
-		
-		}
-		
-		closedir( $DIR );
 	
-	}
-	
-	return $size;
-
-}
-
-$cache_size = formatsize( dirsize( "engine/cache" ) );
-
-$dfs = function_exists('disk_free_space') ? disk_free_space(".") : '0';
-
-$freespace = formatsize( $dfs );
-
-if( $user_group[$member_id['user_group']]['admin_comments'] ) {
-	$edit_comments = "&nbsp;[ <a class=\"status-info\" href=\"?mod=comments&action=edit\">{$lang['edit_comm']}</a> ]";
-} else $edit_comments = "";
-
-if( $member_id['user_group'] == 1 ) {
-
-	if( $lic_tr ) {
-		
-		echo $activation_field;
-
-	}
-	
-	$currect_version = VERSIONID;
-	$currect_build = BUILDID;
-	
-	echo <<<HTML
-<div class="panel panel-default">
-  <div class="panel-heading">
-    {$lang['main_quick']}
-  </div>
-  <div class="list-bordered">
-
-	<div class="row box-section">	
-	  <div class="col-sm-6 media-list media-list-linked">
-		<a class="media-link" href="?mod=editusers&action=list">
-			<div class="media-left"><img src="engine/skins/images/uset.png" class="img-lg section_icon"></div>
-			<div class="media-body">
-				<h6 class="media-heading  text-semibold">{$lang['opt_user']}</h6>
-				<span class="text-muted">{$lang['opt_userc']}</span>
-			</div>
-		</a>
-	  </div>
-	  <div class="col-sm-6 media-list media-list-linked">
-		<a class="media-link" href="?mod=banners">
-			<div class="media-left"><img src="engine/skins/images/rkl.png" class="img-lg section_icon"></div>
-			<div class="media-body">
-				<h6 class="media-heading  text-semibold">{$lang['opt_banner']}</h6>
-				<span class="text-muted">{$lang['opt_bannerc']}</span>
-			</div>
-		</a>
-	  </div>
-	</div>
-
-	<div class="row box-section">	
-	  <div class="col-sm-6 media-list media-list-linked">
-		<a class="media-link" href="?mod=options&action=syscon">
-			<div class="media-left"><img src="engine/skins/images/tools.png" class="img-lg section_icon"></div>
-			<div class="media-body">
-				<h6 class="media-heading  text-semibold">{$lang['opt_all']}</h6>
-				<span class="text-muted">{$lang['opt_allc']}</span>
-			</div>
-		</a>
-	  </div>
-	  <div class="col-sm-6 media-list media-list-linked">
-		<a class="media-link" href="?mod=newsletter">
-			<div class="media-left"><img src="engine/skins/images/nset.png" class="img-lg section_icon"></div>
-			<div class="media-body">
-				<h6 class="media-heading  text-semibold">{$lang['main_newsl']}</h6>
-				<span class="text-muted">{$lang['main_newslc']}</span>
-			</div>
-		</a>
-	  </div>
-	</div>	
-
-	<div class="row box-section">	
-	  <div class="col-sm-6 media-list media-list-linked">
-		<a class="media-link" href="?mod=static">
-			<div class="media-left"><img src="engine/skins/images/spset.png" class="img-lg section_icon"></div>
-			<div class="media-body">
-				<h6 class="media-heading  text-semibold">{$lang['opt_static']}</h6>
-				<span class="text-muted">{$lang['opt_staticd']}</span>
-			</div>
-		</a>
-	  </div>
-	  <div class="col-sm-6 media-list media-list-linked">
-		<a class="media-link" href="?mod=clean">
-			<div class="media-left"><img src="engine/skins/images/clean.png" class="img-lg section_icon"></div>
-			<div class="media-body">
-				<h6 class="media-heading  text-semibold">{$lang['opt_clean']}</h6>
-				<span class="text-muted">{$lang['opt_cleanc']}</span>
-			</div>
-		</a>
-	  </div>
-	</div>	
-
-	<div class="row box-section">	
-	  <div class="col-sm-6 media-list media-list-linked">
-		<a class="media-link" onclick="check_files('lokal'); return false;" href="#">
-			<div class="media-left"><img src="engine/skins/images/shield.png" class="img-lg section_icon"></div>
-			<div class="media-body">
-				<h6 class="media-heading  text-semibold">{$lang['mod_anti']}</h6>
-				<span class="text-muted">{$lang['anti_descr']}</span>
-			</div>
-		</a>
-	  </div>
-	  <div class="col-sm-6 media-list media-list-linked">
-		<a class="media-link" href="?mod=options&action=options">
-			<div class="media-left"><img src="engine/skins/images/next.png" class="img-lg section_icon"></div>
-			<div class="media-body">
-				<h6 class="media-heading  text-semibold">{$lang['opt_all_rublik']}</h6>
-				<span class="text-muted">{$lang['opt_all_rublikc']}</span>
-			</div>
-		</a>
-	  </div>
-	</div>
-
-  </div>
-</div>
-<script>
-<!--
-		function check_files ( folder ){
-
-			if (folder == "snap") {
-
-				DLEconfirm( '{$lang['anti_snapalert']}', '{$lang['p_confirm']}', function () {
-
-					$('#antivirus').html('<div class="panel-body">{$lang['anti_box']}</div>');
-
-					ShowLoading('');		
-					$.post('engine/ajax/controller.php?mod=antivirus', { folder: folder, user_hash: '{$dle_login_hash}' }, function(data){
+			if ( $value[3] == "yesorno" ) {
 				
-						HideLoading('');
+			    if( intval($xfieldsdata[$value[0]]) ) {
+					$xfgiven = true;
+					$xfieldsdata[$value[0]] = $lang['xfield_xyes'];
+				} else {
+					$xfgiven = false;
+					$xfieldsdata[$value[0]] = $lang['xfield_xno'];
+				}
 				
-						$('#antivirus').html(data);
-				
-					});
-
-				} );
-
 			} else {
-
-				$('#antivirusbox').show();
-				$('#antivirus').html('<div class="panel-body">{$lang['anti_box']}</div>');
 				
-				ShowLoading('');		
-				$.post('engine/ajax/controller.php?mod=antivirus', { folder: folder, user_hash: '{$dle_login_hash}' }, function(data){
+				if($xfieldsdata[$value[0]] == "") $xfgiven = false; else $xfgiven = true;
 				
-					HideLoading('');
-				
-					$('#antivirus').html(data);
-				
-				});
-
-			}
-
-			return false;
-		}
-		
-		$(function(){
-
-			$.ajaxSetup({
-				cache: false
-			});
-
-			$('#clearbutton').click(function() {
-
-				$.get("engine/ajax/controller.php?mod=adminfunction&action=clearcache&user_hash={$dle_login_hash}", function( data ){
-
-					$('#cachesize').html('0 b');
-					Growl.info({
-						title: '{$lang['p_info']}',
-						text: data
-					});
-
-				});
-				return false;
-			});
-
-			$('#clearsubscribe').click(function() {
-
-			    DLEconfirm( '{$lang['confirm_action']}', '{$lang['p_confirm']}', function () {
-
-					$.get("engine/ajax/controller.php?mod=adminfunction&action=clearsubscribe&user_hash={$dle_login_hash}", function( data ){
-						Growl.info({
-							title: '{$lang['p_info']}',
-							text: data
-						});
-					});
-				} );
-				return false;
-			});
-
-			$('#check_updates').click(function() {
-			
-				ShowLoading('');
-				
-				$.get("engine/ajax/controller.php?mod=updates&versionid={$currect_version}&user_hash={$dle_login_hash}&build={$currect_build}", function( data ){
-					HideLoading('');
-					DLEalert(data, '{$lang['all_info']}');
-				});
-				return false;
-			});
-
-			$('#send_notice').click(function() {
-
-				ShowLoading('');
-				var notice = $('#notice').val();
-				$.post("engine/ajax/controller.php?mod=adminfunction&action=sendnotice&user_hash={$dle_login_hash}", { notice: notice } , function( data ){
-					HideLoading('');
-					Growl.info({
-						title: '{$lang['all_info']}',
-						text: data
-					});
-				});
-				return false;
-			});
-
-		});
-//-->
-</script>
-<div id="antivirusbox" class="panel panel-default" style="display:none;">
-  <div class="panel-heading">
-    <div class="title">{$lang['anti_title']}</div>
-  </div>
-  <div id="antivirus">
-  {$lang['anti_box']}
-  </div>
-</div>
-
-		
-		<div class="panel panel-default">
-		
-		    <div class="panel-heading">
-				<ul class="nav nav-tabs nav-tabs-solid">
-					<li class="active"><a href="#statall" data-toggle="tab"><i class="fa fa-bar-chart position-left"></i> {$lang['stat_all']}</a></li>
-					<li><a href="#notinfo" data-toggle="tab"><i class="fa fa-pencil-square-o position-left"></i> {$lang['main_notice']}</a></li>
-					<li id="dlestats"><a href="#statauto" data-toggle="tab"><i class="fa fa-cog position-left"></i> {$lang['stat_auto']}</a></li>
-				</ul>
-			</div>
-		
-                 <div class="panel-tab-content tab-content">
-                     <div class="tab-pane active" id="statall">
-					 
-						<table class="table table-sm">
-							<tr>
-								<td class="col-md-3 col-sm-6">{$lang['site_status']}</td>
-								<td class="col-md-9 col-sm-6">{$offline}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_allnews']}</td>
-								<td>{$stats_arr['stats_news']}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_mod']}</td>
-								<td>{$stats_arr['approve']}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_complaint']}</td>
-								<td>{$c_complaint}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_comments']}</td>
-								<td>{$stats_arr['count_comments']} [ <a href="{$config['http_home_url']}index.php?do=lastcomments" target="_blank">{$lang['last_comm']}</a> ]{$edit_comments}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_cmod']}</td>
-								<td>{$stats_arr['count_c_app']}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_users']}</td>
-								<td>{$stats_arr['stats_users']}{$self_deleted}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_banned']}</td>
-								<td><span class="text-danger">{$stats_arr['stats_banned']}</span></td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_bd']}</td>
-								<td>{$stats_arr['mysql_size']}</td>
-							</tr>
-							<tr>
-								<td>{$lang['cache_size']}</td>
-								<td><span id="cachesize">{$cache_size}</span></td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_maxfile']}</td>
-								<td>{$maxupload}</td>
-							</tr>
-							<tr>
-								<td>{$lang['free_size']}</td>
-								<td>{$freespace}</td>
-							</tr>
-						</table>
-
-						<div class="panel-footer">
-HTML;
-
-	echo "<button id=\"check_updates\" name=\"check_updates\" class=\"btn bg-slate-600 btn-sm btn-raised\"><i class=\"fa fa-exclamation-circle\"></i> {$lang['dle_udate']}</button>&nbsp;<button id=\"clearbutton\" name=\"clearbutton\" class=\"btn bg-danger-600 btn-sm btn-raised\"><i class=\"fa fa-trash\"></i> {$lang['btn_clearcache']}</button>";
-
-	if ($stats_arr['count_subscribe']) echo "&nbsp;<button id=\"clearsubscribe\" name=\"clearsubscribe\" class=\"btn bg-brown-600 btn-sm btn-raised\"><i class=\"fa fa-user\"></i> {$lang['btn_clearsubscribe']}</button>";
-
-	$row = $db->super_query( "SELECT notice FROM " . PREFIX . "_notice WHERE user_id = '{$member_id['user_id']}'" );
-
-	if( isset ($row['notice']) ) {
-		$row['notice'] = htmlspecialchars( $row['notice'], ENT_QUOTES, $config['charset'] );
-	} else {
-		$row['notice'] = '';
-	}
-
-
-echo <<<HTML
-						</div>
-					</div>
-                     <div class="tab-pane has-padding" id="notinfo">
-							<textarea id="notice" name="notice" dir="auto" class="classic" style="width:100%;height:200px;" placeholder="{$lang['main_no_notice']}">{$row['notice']}</textarea>
-							<button id="send_notice" name="send_notice" class="btn bg-teal btn-sm btn-raised"><i class="fa fa-floppy-o"></i> {$lang['news_save']}</button>
-                     </div>
-                     <div class="tab-pane" id="statauto" >
-						<table class="table table-sm">
-							<tr>
-								<td class="col-md-3">{$lang['dle_version']}</td>
-								<td class="col-md-9">{$config['version_id']}</td>
-							</tr>
-							<tr>
-								<td>{$lang['licence_info']}</td>
-								<td>{$licence}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_os']}</td>
-								<td>{$os_version}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_php']}</td>
-								<td>{$phpv}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_mysql']}</td>
-								<td>{$db->mysql_version}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_gd']}</td>
-								<td>{$gdversion}</td>
-							</tr>
-							<tr>
-								<td>Module mod_rewrite</td>
-								<td>{$mod_rewrite}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_safemode']}</td>
-								<td>{$safemode}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_maxmem']}</td>
-								<td>{$maxmemory}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_func']}</td>
-								<td>{$disabledfunctions}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_maxfile']}</td>
-								<td>{$maxupload}</td>
-							</tr>
-							<tr>
-								<td>{$lang['free_size']}</td>
-								<td>{$freespace}</td>
-							</tr>
-						</table>      
-                     </div>
-                 </div>
-             </div>
-HTML;
-
-	if( !is_writable( ENGINE_DIR . "/cache/" ) OR !is_writable( ENGINE_DIR . "/cache/system/" ) ) {
-		echo "<div class=\"alert alert-warning alert-styled-left alert-arrow-left alert-component\">{$lang['stat_cache']}</div>";
-	
-	}
-	
-	if( @file_exists( "install.php" ) ) {
-		echo "<div class=\"alert alert-danger alert-styled-left alert-arrow-left alert-component\">{$lang['stat_install']}</div>";
-	}
-	if( $dfs AND $dfs < 20240 ) {
-		echo "<div class=\"alert alert-warning alert-styled-left alert-arrow-left alert-component\">{$lang['stat_nofree']}</div>";
-	}
-	
-	if (!defined( 'SECURE_AUTH_KEY' ) OR strlen(SECURE_AUTH_KEY) < 20 ) {
-		echo "<div class=\"alert alert-danger alert-styled-left alert-arrow-left alert-component\">{$lang['stat_sec_auth']}</div>";
-	}
-	
-	if (get_ip() == "not detected" ) {
-		echo "<div class=\"alert alert-danger alert-styled-left alert-arrow-left alert-component\">{$lang['stat_sec_ip']}</div>";
-	}
-	
-	if( !function_exists( 'simplexml_load_string' ) ) {
-		echo "<div class=\"alert alert-warning alert-styled-left alert-arrow-left alert-component\">{$lang['stat_not_min']} SimpleXML</div>";
-	}
-
-	if( !@extension_loaded('zlib') ) {
-		echo "<div class=\"alert alert-warning alert-styled-left alert-arrow-left alert-component\">{$lang['stat_not_min']} Zlib</div>";
-	}
-	
-	if( !@extension_loaded('curl') ) {
-		echo "<div class=\"alert alert-warning alert-styled-left alert-arrow-left alert-component\">{$lang['stat_not_min']} CURL</div>";
-	}
-	
-	if( preg_match('/1|yes|on|true/i', ini_get('register_globals')) ) {
-		echo "<div class=\"alert alert-warning alert-styled-left alert-arrow-left alert-component\">{$lang['stat_secfault']}</div>";
-	}
-	
-	if( version_compare($phpv, '8.0', '<') ) {
-		$lang['stat_phperror'] = str_replace('{version}', '8.0', $lang['stat_phperror']);
-		echo "<div class=\"alert alert-danger alert-styled-left alert-arrow-left alert-component\">{$lang['stat_phperror']}</div>";
-	}
-
-
-	$plugins_errors = array();
-	
-	$db->query( "SELECT plugin_id, COUNT(id) AS count FROM " . PREFIX . "_plugins_logs GROUP BY plugin_id" );
-	
-	while ( $row = $db->get_row() ) {
-		$plugins_errors[$row['plugin_id']] = $row['count'];
-	}
-	
-	if( count($plugins_errors) ) {
-		
-		echo "<div class=\"alert alert-danger alert-styled-left alert-arrow-left alert-component\">{$lang['plugins_errors_11']}<br><br><a class=\"btn bg-brown-600 btn-sm btn-raised position-left legitRipple\" href=\"?mod=plugins&action=errors\"><i class=\"fa fa-exclamation-triangle position-left\"></i>{$lang['plugins_errors_12']}</a></div>";
-		
-	}
-	
-
-	if( $config['cache_type'] ) {
-		if ($dlefastcache->connection < 1) {
-			
-			if( $config['cache_type'] == "2" ) {
-				$lang['stat_m_fail'] = str_ireplace("Memcache", "Redis", $lang['stat_m_fail']);
-				$lang['stat_m_fail_1'] = str_ireplace("Memcached", "Redis", $lang['stat_m_fail_1']);
-				$lang['stat_m_fail_1'] = str_ireplace("Memcache", "Redis", $lang['stat_m_fail_1']);
 			}
 			
-			if (!$dlefastcache->connection) {
-				echo "<div class=\"alert alert-warning alert-styled-left alert-arrow-left alert-component\">{$lang['stat_m_fail']}</div>";
-			} elseif($dlefastcache->connection == -2) {
-				echo "<div class=\"alert alert-warning alert-styled-left alert-arrow-left alert-component\">{$lang['stat_m_fail_2']}</div>";
+			if( !$xfgiven ) {
+				$tpl->copy_template = preg_replace( "'\\[xfgiven_{$preg_safe_name}\\](.*?)\\[/xfgiven_{$preg_safe_name}\\]'is", "", $tpl->copy_template );
+				$tpl->copy_template = str_replace( "[xfnotgiven_{$value[0]}]", "", $tpl->copy_template );
+				$tpl->copy_template = str_replace( "[/xfnotgiven_{$value[0]}]", "", $tpl->copy_template );
 			} else {
-				echo "<div class=\"alert alert-warning alert-styled-left alert-arrow-left alert-component\">{$lang['stat_m_fail_1']}</div>";
+				$tpl->copy_template = preg_replace( "'\\[xfnotgiven_{$preg_safe_name}\\](.*?)\\[/xfnotgiven_{$preg_safe_name}\\]'is", "", $tpl->copy_template );
+				$tpl->copy_template = str_replace( "[xfgiven_{$value[0]}]", "", $tpl->copy_template );
+				$tpl->copy_template = str_replace( "[/xfgiven_{$value[0]}]", "", $tpl->copy_template );
 			}
-		}
-	}
+			
+			if(strpos( $tpl->copy_template, "[ifxfvalue {$value[0]}" ) !== false ) {
+				$tpl->copy_template = preg_replace_callback ( "#\\[ifxfvalue(.+?)\\](.+?)\\[/ifxfvalue\\]#is", "check_xfvalue", $tpl->copy_template );
+			}
 
-	$check_files       = array(
-		"/templates/.htaccess",
-		"/uploads/.htaccess",
-		"/uploads/files/.htaccess",
-		"/engine/data/.htaccess",
-		"/engine/cache/.htaccess",
-	);
+			if ($value[3] == "select" and isset($xfieldsdata[$value[0]]) and $xfieldsdata[$value[0]] and !$value[6]) {
+				$xfieldsdata[$value[0]] = explode(',', $xfieldsdata[$value[0]]);
+				$xfieldsdata[$value[0]] = implode($value[35], $xfieldsdata[$value[0]]);
+			}
 
-	foreach ($check_files as $file) {
+			if ( $value[6] AND !empty( $xfieldsdata[$value[0]] ) ) {
+				$temp_array = explode( ",", $xfieldsdata[$value[0]] );
+				$value3 = array();
 
-		if( !file_exists( ROOT_DIR .$file ) ) {
-			echo "<div class=\"alert alert-danger alert-styled-left alert-arrow-left alert-component\">".str_replace("{folder}", $file, $lang['stat_secfault_2'])."</div>";
-		}
+				foreach ($temp_array as $value2) {
 
-	}
-
-	if( COLLATE == "utf8" ) {
-		echo "<div class=\"alert alert-warning alert-styled-left alert-arrow-left alert-component\">{$lang['upgr_utf8']}</div>";
-	}
-	
-	if( !$lic_tr AND defined('DEMOVERSION') ) {
-		echo "<div class=\"alert alert-warning alert-styled-left alert-arrow-left alert-component\">{$lang['upgr_demo']}</div>";
-	}
-
-} else {
-
-	$row = $db->super_query( "SELECT notice FROM " . PREFIX . "_notice WHERE user_id = '{$member_id['user_id']}'" );
-		
-	$row['notice'] = isset($row['notice']) ? htmlspecialchars( stripslashes( $row['notice'] ), ENT_QUOTES, $config['charset'] ) : '';
-
-echo <<<HTML
-<div class="panel panel-default">
-	<div class="panel-heading">
-		<ul class="nav nav-tabs nav-tabs-solid">
-			<li class="active"><a href="#statall" data-toggle="tab"><i class="fa fa-bar-chart position-left"></i> {$lang['stat_all']}</a></li>
-			<li><a href="#notinfo" data-toggle="tab"><i class="fa fa-pencil-square-o position-left"></i> {$lang['main_notice']}</a></li>
-		</ul>
-	</div>
-                 <div class="panel-tab-content tab-content">
-                     <div class="tab-pane active" id="statall">
-						<table class="table table-sm">
-							<tr>
-								<td class="col-md-3 col-sm-6">{$lang['site_status']}</td>
-								<td class="col-md-9 col-sm-6">{$offline}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_allnews']}</td>
-								<td>{$stats_arr['stats_news']}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_mod']}</td>
-								<td>{$stats_arr['approve']}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_complaint']}</td>
-								<td>{$c_complaint}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_comments']}</td>
-								<td>{$stats_arr['count_comments']} [ <a href="{$config['http_home_url']}index.php?do=lastcomments" target="_blank">{$lang['last_comm']}</a> ]{$edit_comments}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_cmod']}</td>
-								<td>{$stats_arr['count_c_app']}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_users']}</td>
-								<td>{$stats_arr['stats_users']}{$self_deleted}</td>
-							</tr>
-							<tr>
-								<td>{$lang['stat_banned']}</td>
-								<td><span class="text-danger">{$stats_arr['stats_banned']}</span></td>
-							</tr>
-						</table>
-					</div>
+					$value2 = trim($value2);
 					
-                     <div class="tab-pane" id="notinfo" >
-						<div class="panel-body">
-							<textarea id="notice" name="notice" dir="auto" class="classic" style="width:100%;height:200px;" placeholder="{$lang['main_no_notice']}">{$row['notice']}</textarea>
-							<button id="send_notice" name="send_notice" class="btn bg-teal btn-sm btn-raised"><i class="fa fa-floppy-o"></i> {$lang['news_save']}</button>
-						</div>
-                     </div>
-				</div>
-</div>
-<script>
-		$(function(){
+					if($value2) {
+						
+						$value4 = str_replace(array("&#039;", "&quot;", "&amp;", "&#123;", "&#91;", "&#58;", "/"), array("'", '"', "&", "{", "[", ":", "&frasl;"), $value2);
+						
+						if( $value[3] == "datetime" ) {
+						
+							$value2 = strtotime( $value4 );
+						
+							if( !trim($value[24]) ) $value[24] = $config['timestamp_active'];
+							
+							if (strpos($tpl->copy_template, "[xfvalue_{$value[0]} format=") !== false) {
 
-			$('#send_notice').click(function() {
+								$tpl->copy_template = preg_replace_callback("#\\[xfvalue_{$preg_safe_name} format=['\"](.*?)['\"]\\]#i",
+									function ($matches) use ($value, $value2, $value4, $customlangdate, $config, $PHP_SELF) {
 
-				ShowLoading('');
-				var notice = $('#notice').val();
-				$.post("engine/ajax/controller.php?mod=adminfunction&action=sendnotice&user_hash={$dle_login_hash}", { notice: notice } , function( data ){
-					HideLoading('');
-					DLEalert(data, '{$lang['all_info']}');
-				});
-				return false;
-			});
+										$matches[1] = trim($matches[1]);
 
-		});
-</script>
+										if ($value[25]) {
+
+											if ($value[26]) $value2 = langdate($matches[1], $value2);
+											else return $value2 = langdate($matches[1], $value2, false, $customlangdate);
+										} else $value2 = date($matches[1], $value2);
+
+										if ($config['allow_alt_url']) return "<a href=\"" . $config['http_home_url'] . "xfsearch/" . $value[0] . "/" . rawurlencode(dle_strtolower($value4)) . "/\">" . $value2 . "</a>";
+										else return "<a href=\"$PHP_SELF?do=xfsearch&amp;xfname=" . $value[0] . "&amp;xf=" . rawurlencode(dle_strtolower($value4)) . "\">" . $value2 . "</a>";
+
+									}, $tpl->copy_template);
+							}
+
+							if( $value[25] ) {
+								
+								if($value[26]) $value2 = langdate($value[24], $value2);
+								else $value2 = langdate($value[24], $value2, false, $customlangdate);
+								
+							} else $value2 = date( $value[24], $value2 );
+
+						}
+
+						if( $config['allow_alt_url'] ) $value3[] = "<a href=\"" . $config['http_home_url'] . "xfsearch/" .$value[0]."/". rawurlencode( dle_strtolower($value4) ) . "/\">" . $value2 . "</a>";
+						else $value3[] = "<a href=\"$PHP_SELF?do=xfsearch&amp;xfname=".$value[0]."&amp;xf=" . rawurlencode( dle_strtolower($value4) ) . "\">" . $value2 . "</a>";
+						
+					}
+
+				}
+				
+				if ($value[3] == "select" and $value[35]) {
+					$value[21] = $value[35];
+				}
+
+				if( empty($value[21]) ) $value[21] = ", ";
+				
+				$xfieldsdata[$value[0]] = implode($value[21], $value3);
+
+				unset($temp_array);
+				unset($value2);
+				unset($value3);
+				unset($value4);
+
+			} elseif ( $value[3] == "datetime" AND !empty($xfieldsdata[$value[0]]) ) {
+
+				$xfieldsdata[$value[0]] = strtotime( str_replace("&#58;", ":", $xfieldsdata[$value[0]]) );
+
+				if( !trim($value[24]) ) $value[24] = $config['timestamp_active'];
+
+				if (strpos ( $tpl->copy_template, "[xfvalue_{$value[0]} format=" ) !== false) {
+					
+					$tpl->copy_template = preg_replace_callback ( "#\\[xfvalue_{$preg_safe_name} format=['\"](.*?)['\"]\\]#i", 
+						function ($matches) use ($value, $xfieldsdata, $customlangdate) {
+							
+							$matches[1] = trim($matches[1]);
+							
+							if ($value[25]) {
+
+								if ($value[26]) return langdate($matches[1], $xfieldsdata[$value[0]]);
+								else return langdate($matches[1], $xfieldsdata[$value[0]], false, $customlangdate);
+
+							} else return date($matches[1], $xfieldsdata[$value[0]]);
+
+							
+						}, $tpl->copy_template );
+						
+				}
+
+				if( $value[25] ) {
+					
+					if($value[26]) $xfieldsdata[$value[0]] = langdate($value[24], $xfieldsdata[$value[0]]);
+					else $xfieldsdata[$value[0]] = langdate($value[24], $xfieldsdata[$value[0]], false, $customlangdate);
+								
+				} else $xfieldsdata[$value[0]] = date( $value[24], $xfieldsdata[$value[0]] );
+				
+			}
+
+
+			if ($config['allow_links'] AND $value[3] == "textarea" AND function_exists('replace_links') AND isset($replace_links['news']) ) $xfieldsdata[$value[0]] = replace_links ( $xfieldsdata[$value[0]], $replace_links['news'] );
+
+			if($value[3] == "image" AND isset($xfieldsdata[$value[0]]) AND $xfieldsdata[$value[0]] ) {
+				
+				$temp_array = explode('|', $xfieldsdata[$value[0]]);
+					
+				if (count($temp_array) == 1 OR count($temp_array) == 5 ){
+						
+					$temp_alt = '';
+					$temp_value = implode('|', $temp_array );
+						
+				} else {
+						
+					$temp_alt = $temp_array[0];
+					$temp_alt = str_replace( "&amp;#44;", "&#44;", $temp_alt );
+					$temp_alt = str_replace( "&amp;#124;", "&#124;", $temp_alt );
+					
+					unset($temp_array[0]);
+					$temp_value =  implode('|', $temp_array );
+						
+				}
+
+				$path_parts = get_uploaded_image_info($temp_value);
+				
+				if( $value[12] AND $path_parts->thumb ) {
+					
+					$tpl->set( "[xfvalue_thumb_url_{$value[0]}]", $path_parts->thumb);
+					$xfieldsdata[$value[0]] = "<a href=\"{$path_parts->url}\" data-highslide=\"single\" target=\"_blank\"><img class=\"xfieldimage {$value[0]}\" src=\"{$path_parts->thumb}\" alt=\"{$temp_alt}\"></a>";
+
+				} else {
+					
+					$tpl->set( "[xfvalue_thumb_url_{$value[0]}]", $path_parts->url);
+					$xfieldsdata[$value[0]] = "<img class=\"xfieldimage {$value[0]}\" src=\"{$path_parts->url}\" alt=\"{$temp_alt}\">";
+
+				}
+				
+				$tpl->set( "[xfvalue_image_url_{$value[0]}]", $path_parts->url);
+				$tpl->set( "[xfvalue_image_description_{$value[0]}]", $temp_alt);
+
+			}
+			
+			$xfieldsdata[$value[0]] = isset($xfieldsdata[$value[0]]) ? $xfieldsdata[$value[0]] : '';
+			
+			if($value[3] == "image" AND !$xfieldsdata[$value[0]]) {
+				$tpl->set( "[xfvalue_thumb_url_{$value[0]}]", "");
+				$tpl->set( "[xfvalue_image_url_{$value[0]}]", "");
+				$tpl->set( "[xfvalue_image_description_{$value[0]}]", "");
+			}
+
+			if (($value[3] == "video" or $value[3] == "audio") and $xfieldsdata[$value[0]] and stripos($tpl->copy_template, "_{$value[0]}") !== false) {
+
+				$fieldvalue_arr = explode(',', $xfieldsdata[$value[0]]);
+				$playlist = array();
+				$playlist_single = array();
+				$xf_playlist_count = 0;
+
+				if ($value[3] == "audio") {
+					$xftag = "audio";
+					$xftype = "audio/mp3";
+				} else {
+					$xftag = "video";
+					$xftype = "video/mp4";
+				}
+
+				if (!isset($video_config)) {
+					include_once(ENGINE_DIR . '/data/videoconfig.php');
+				}
+
+				if ($video_config['preload']) $preload = "metadata";
+				else $preload = "none";
+
+				$playlist_width = $video_config['width'];
+
+				if (substr($playlist_width, -1, 1) != '%') $playlist_width = $playlist_width . "px";
+
+				$playlist_width = "style=\"width:100%;max-width:{$playlist_width};\"";
+
+				foreach ($fieldvalue_arr as $temp_value) {
+
+					$xf_playlist_count++;
+
+					$temp_value = trim($temp_value);
+
+					if (!$temp_value) continue;
+
+					$temp_array = explode('|', $temp_value);
+
+					if (count($temp_array) < 4) {
+
+						$temp_alt = '';
+						$temp_url = $temp_array[0];
+					} else {
+
+						$temp_alt = $temp_array[0];
+						$temp_url = $temp_array[1];
+					}
+
+					$filename = pathinfo($temp_url, PATHINFO_FILENAME);
+					$filename = explode("_", $filename);
+					if (count($filename) > 1 and intval($filename[0])) unset($filename[0]);
+					$filename = implode("_", $filename);
+
+					if (!$temp_alt) $temp_alt = $filename;
+
+					$playlist[] = "<{$xftag} title=\"{$temp_alt}\" preload=\"{$preload}\" controls><source type=\"{$xftype}\" src=\"{$temp_url}\"></{$xftag}>";
+					$playlist_single['[xfvalue_' . $value[0] . ' ' . $xftag . '="' . $xf_playlist_count . '"]'] = "<div class=\"dleplyrplayer\" {$playlist_width} theme=\"{$video_config['theme']}\"><{$xftag} title=\"{$temp_alt}\" preload=\"{$preload}\" controls><source type=\"{$xftype}\" src=\"{$temp_url}\"></{$xftag}></div>";
+
+					$playlist_single['[xfvalue_' . $value[0] . ' ' . $xftag . '-description="' . $xf_playlist_count . '"]'] = $temp_alt;
+					$playlist_single['[xfvalue_' . $value[0] . ' ' . $xftag . '-url="' . $xf_playlist_count . '"]'] = $temp_url;
+
+					$tpl->copy_template = str_ireplace('[xfgiven_' . $value[0] . ' ' . $xftag . '="' . $xf_playlist_count . '"]', "", $tpl->copy_template);
+					$tpl->copy_template = str_ireplace('[/xfgiven_' . $value[0] . ' ' . $xftag . '="' . $xf_playlist_count . '"]', "", $tpl->copy_template);
+					$tpl->copy_template = preg_replace("'\\[xfnotgiven_{$preg_safe_name} {$xftag}=\"{$xf_playlist_count}\"\\](.*?)\\[/xfnotgiven_{$preg_safe_name} {$xftag}=\"{$xf_playlist_count}\"\\]'is", "", $tpl->copy_template);
+				}
+
+				if (count($playlist_single)) {
+					foreach ($playlist_single as $temp_key => $temp_value) $tpl->set($temp_key, $temp_value);
+				}
+
+				$xfieldsdata[$value[0]] = "<div class=\"dleplyrplayer\" {$playlist_width} theme=\"{$video_config['theme']}\">" . implode($playlist) . "</div>";
+			}
+
+			if($value[3] == "imagegalery" AND $xfieldsdata[$value[0]] AND stripos ( $tpl->copy_template, "_{$value[0]}" ) !== false) {
+				
+				$fieldvalue_arr = explode(',', $xfieldsdata[$value[0]]);
+				$gallery_image = array();
+				$gallery_single_image = array();
+				$xf_image_count = 0;
+				
+				foreach ($fieldvalue_arr as $temp_value) {
+					
+					$xf_image_count ++;
+					
+					$temp_value = trim($temp_value);
+			
+					if($temp_value == "") continue;
+					
+					$temp_array = explode('|', $temp_value);
+					
+					if (count($temp_array) == 1 OR count($temp_array) == 5 ){
+							
+						$temp_alt = '';
+						$temp_value = implode('|', $temp_array );
+							
+					} else {
+							
+						$temp_alt = $temp_array[0];
+						$temp_alt = str_replace( "&amp;#44;", "&#44;", $temp_alt );
+						$temp_alt = str_replace( "&amp;#124;", "&#124;", $temp_alt );
+						
+						unset($temp_array[0]);
+						$temp_value =  implode('|', $temp_array );
+							
+					}
+
+					$path_parts = get_uploaded_image_info($temp_value);
+				
+					if($value[12] AND $path_parts->thumb) {
+						
+						$gallery_image[] = "<li><a href=\"{$path_parts->url}\" data-highslide=\"xf_{$row['id']}_{$value[0]}\" target=\"_blank\"><img src=\"{$path_parts->thumb}\" alt=\"{$temp_alt}\"></a></li>";
+						$gallery_single_image['[xfvalue_'.$value[0].' image="'.$xf_image_count.'"]'] = "<a href=\"{$path_parts->url}\" data-highslide=\"single\" target=\"_blank\"><img class=\"xfieldimage {$value[0]}\" src=\"{$path_parts->thumb}\" alt=\"{$temp_alt}\"></a>";
+						
+					} else {
+						$gallery_image[] = "<li><img src=\"{$path_parts->url}\" alt=\"{$temp_alt}\"></li>";
+						$gallery_single_image['[xfvalue_'.$value[0].' image="'.$xf_image_count.'"]'] = "<img class=\"xfieldimage {$value[0]}\" src=\"{$path_parts->url}\" alt=\"{$temp_alt}\">";
+					}
+				
+				}
+				
+				if( !$path_parts->thumb ) $path_parts->thumb = $path_parts->url;
+				
+				$gallery_single_image['[xfvalue_'.$value[0].' image-description="'.$xf_image_count.'"]'] = $temp_alt;
+				$gallery_single_image['[xfvalue_'.$value[0].' image-thumb-url="'.$xf_image_count.'"]'] = $path_parts->thumb;
+				$gallery_single_image['[xfvalue_'.$value[0].' image-url="'.$xf_image_count.'"]'] = $path_parts->url;
+				
+				$tpl->copy_template = str_ireplace( '[xfgiven_'.$value[0].' image="'.$xf_image_count.'"]', "", $tpl->copy_template );
+				$tpl->copy_template = str_ireplace( '[/xfgiven_'.$value[0].' image="'.$xf_image_count.'"]', "", $tpl->copy_template );
+				$tpl->copy_template = preg_replace( "'\\[xfnotgiven_{$preg_safe_name} image=\"{$xf_image_count}\"\\](.*?)\\[/xfnotgiven_{$preg_safe_name} image=\"{$xf_image_count}\"\\]'is", "", $tpl->copy_template );
+		
+				if(count($gallery_single_image) ) {
+					foreach($gallery_single_image as $temp_key => $temp_value) $tpl->set( $temp_key, $temp_value);
+				}
+				
+				$xfieldsdata[$value[0]] = "<ul class=\"xfieldimagegallery {$value[0]}\">".implode($gallery_image)."</ul>";
+				
+			}
+			
+			$tpl->copy_template = preg_replace( "'\\[xfgiven_{$preg_safe_name} (image|video|audio)=\"(\d+)\"\\](.*?)\\[/xfgiven_{$preg_safe_name} (image|video|audio)=\"(\d+)\"\\]'is", "", $tpl->copy_template );
+			$tpl->copy_template = preg_replace( "'\\[xfnotgiven_{$preg_safe_name} (image|video|audio)=\"(\d+)\"\\]'i", "", $tpl->copy_template );
+			$tpl->copy_template = preg_replace( "'\\[/xfnotgiven_{$preg_safe_name} (image|video|audio)=\"(\d+)\"\\]'i", "", $tpl->copy_template );
+			
+			if ($value[30]) $xfieldsdata[$value[0]] = preg_replace_callback ( "#<(img|iframe)(.+?)>#i", "enable_lazyload", $xfieldsdata[$value[0]] );
+			
+			$tpl->copy_template = str_ireplace( "[xfvalue_{$value[0]}]", $xfieldsdata[$value[0]], $tpl->copy_template);
+
+			if ( preg_match( "#\\[xfvalue_{$preg_safe_name} limit=['\"](.+?)['\"]\\]#i", $tpl->copy_template, $matches ) ) {
+				$tpl->copy_template = str_ireplace( $matches[0], clear_content($xfieldsdata[$value[0]], $matches[1]), $tpl->copy_template );
+			}
+			
+			if (stripos ( $tpl->copy_template, "[hide" ) !== false ) {
+				
+				$tpl->copy_template = preg_replace_callback ( "#\[hide(.*?)\](.+?)\[/hide\]#is", 
+					function ($matches) use ($member_id, $user_group, $lang) {
+						
+						$matches[1] = str_replace(array("=", " "), "", $matches[1]);
+						$matches[2] = $matches[2];
+		
+						if( $matches[1] ) {
+							
+							$groups = explode( ',', $matches[1] );
+		
+							if( in_array( $member_id['user_group'], $groups ) OR $member_id['user_group'] == "1") {
+								return $matches[2];
+							} else return "<div class=\"quote dlehidden\">" . $lang['news_regus'] . "</div>";
+							
+						} else {
+							
+							if( $user_group[$member_id['user_group']]['allow_hide'] ) return $matches[2]; else return "<div class=\"quote dlehidden\">" . $lang['news_regus'] . "</div>";
+							
+						}
+		
+				}, $tpl->copy_template );
+			}
+
+
+			if( $config['files_allow'] ) if( strpos( $tpl->copy_template, "[attachment=" ) !== false ) {
+				$tpl->copy_template = show_attach( $tpl->copy_template, NEWS_ID );
+			}
+		}
+	}
+		
+} else {
+	
+	if( strpos( $tpl->copy_template, "related-news" ) !== false ) {
+		$tpl->set( '{related-news}', "" );
+		$tpl->set_block( "'\\[related-news\\](.*?)\\[/related-news\\]'si", "" );
+	}
+	
+	if( strpos( $tpl->copy_template, "[xf" ) !== false ) {
+		$tpl->copy_template = preg_replace( "'\\[xfnotgiven_(.*?)\\](.*?)\\[/xfnotgiven_(.*?)\\]'is", "", $tpl->copy_template );
+		$tpl->copy_template = preg_replace( "'\\[xfgiven_(.*?)\\](.*?)\\[/xfgiven_(.*?)\\]'is", "", $tpl->copy_template );
+		$tpl->copy_template = preg_replace( "'\\[xfvalue_(.*?)\\]'i", "", $tpl->copy_template );
+	}
+	
+	if( strpos( $tpl->copy_template, "[ifxfvalue" ) !== false ) {
+		$tpl->copy_template = preg_replace( "#\\[ifxfvalue(.+?)\\](.+?)\\[/ifxfvalue\\]#is", "", $tpl->copy_template );
+	}
+
+}
+
+if ($config['allow_skin_change']) $tpl->set ( '{changeskin}', ChangeSkin ( $config['skin'] ) );
+
+if (count ( $banners ) and $config['allow_banner']) {
+
+	foreach ( $banners as $name => $value ) {
+		$tpl->copy_template = str_replace ( "{banner_" . $name . "}", $value, $tpl->copy_template );
+		if ( $value ) {
+			$tpl->copy_template = str_replace ( "[banner_" . $name . "]", "", $tpl->copy_template );
+			$tpl->copy_template = str_replace ( "[/banner_" . $name . "]", "", $tpl->copy_template );
+		}
+	}
+
+}
+
+$tpl->set_block ( "'{banner_(.*?)}'si", "" );
+$tpl->set_block ( "'\\[banner_(.*?)\\](.*?)\\[/banner_(.*?)\\]'si", "" );
+
+if ($config['rss_informer'] AND count ($informers) ) {
+	foreach ( $informers as $name => $value ) {
+		$tpl->copy_template = str_replace ( "{inform_" . $name . "}", $value, $tpl->copy_template );
+	}
+}
+
+if (stripos ( $tpl->copy_template, "[category=" ) !== false) {
+	$tpl->copy_template = preg_replace_callback ( "#\\[(category)=(.+?)\\](.*?)\\[/category\\]#is", "check_category", $tpl->copy_template );
+}
+
+if (stripos ( $tpl->copy_template, "[not-category=" ) !== false) {
+	$tpl->copy_template = preg_replace_callback ( "#\\[(not-category)=(.+?)\\](.*?)\\[/not-category\\]#is", "check_category", $tpl->copy_template );
+}
+
+if (stripos ( $tpl->copy_template, "[static=" ) !== false) {
+	$tpl->copy_template = preg_replace_callback ( "#\\[(static)=(.+?)\\](.*?)\\[/static\\]#is", "check_static", $tpl->copy_template );
+}
+
+if (stripos ( $tpl->copy_template, "[not-static=" ) !== false) {
+	$tpl->copy_template = preg_replace_callback ( "#\\[(not-static)=(.+?)\\](.*?)\\[/not-static\\]#is", "check_static", $tpl->copy_template );
+}
+
+if (stripos ( $tpl->copy_template, "{customcomments" ) !== false) {
+	$tpl->copy_template = preg_replace_callback ( "#\\{customcomments(.+?)\\}#i", "custom_comments", $tpl->copy_template );
+}
+
+if (stripos ( $tpl->copy_template, "{custom" ) !== false) {
+	$tpl->copy_template = preg_replace_callback ( "#\\{custom(.+?)\\}#i", "custom_print", $tpl->copy_template );
+}
+
+if ( ($allow_active_news AND $news_found AND $config['allow_change_sort'] AND $dle_module != "userinfo") OR defined('CUSTOMSORT')) {
+
+	$tpl->set ( '[sort]', "" );
+	$tpl->set ( '{sort}', news_sort ( $do ) );
+	$tpl->set ( '[/sort]', "" );
+
+} else {
+
+	$tpl->set_block ( "'\\[sort\\](.*?)\\[/sort\\]'si", "" );
+
+}
+
+$tpl->copy_template = str_replace ( "{topnews}", $tpl->result['topnews'], $tpl->copy_template );
+
+if( $vk_url ) {
+	$tpl->set( '[vk]', "" );
+	$tpl->set( '[/vk]', "" );
+	$tpl->set( '{vk_url}', $vk_url );	
+} else {
+	$tpl->set_block( "'\\[vk\\](.*?)\\[/vk\\]'si", "" );
+	$tpl->set( '{vk_url}', '' );	
+}
+if( $odnoklassniki_url ) {
+	$tpl->set( '[odnoklassniki]', "" );
+	$tpl->set( '[/odnoklassniki]', "" );
+	$tpl->set( '{odnoklassniki_url}', $odnoklassniki_url );
+} else {
+	$tpl->set_block( "'\\[odnoklassniki\\](.*?)\\[/odnoklassniki\\]'si", "" );
+	$tpl->set( '{odnoklassniki_url}', '' );	
+}
+if( $facebook_url ) {
+	$tpl->set( '[facebook]', "" );
+	$tpl->set( '[/facebook]', "" );
+	$tpl->set( '{facebook_url}', $facebook_url );	
+} else {
+	$tpl->set_block( "'\\[facebook\\](.*?)\\[/facebook\\]'si", "" );
+	$tpl->set( '{facebook_url}', '' );	
+}
+if( $google_url ) {
+	$tpl->set( '[google]', "" );
+	$tpl->set( '[/google]', "" );
+	$tpl->set( '{google_url}', $google_url );
+} else {
+	$tpl->set_block( "'\\[google\\](.*?)\\[/google\\]'si", "" );
+	$tpl->set( '{google_url}', '' );	
+}
+if( $mailru_url ) {
+	$tpl->set( '[mailru]', "" );
+	$tpl->set( '[/mailru]', "" );
+	$tpl->set( '{mailru_url}', $mailru_url );	
+} else {
+	$tpl->set_block( "'\\[mailru\\](.*?)\\[/mailru\\]'si", "" );
+	$tpl->set( '{mailru_url}', '' );	
+}
+if( $yandex_url ) {
+	$tpl->set( '[yandex]', "" );
+	$tpl->set( '[/yandex]', "" );
+	$tpl->set( '{yandex_url}', $yandex_url );
+} else {
+	$tpl->set_block( "'\\[yandex\\](.*?)\\[/yandex\\]'si", "" );
+	$tpl->set( '{yandex_url}', '' );
+}
+
+$config['http_home_url'] = explode ( "index.php", strtolower ( $_SERVER['PHP_SELF'] ) );
+$config['http_home_url'] = reset ( $config['http_home_url'] );
+
+if ( !$user_group[$member_id['user_group']]['allow_admin'] ) $config['admin_path'] = "";
+if ($config['thumb_gallery'] and ($dle_module == "showfull" or $dle_module == "static")) $config['thumb_gallery'] = 1; else $config['thumb_gallery'] = 0;
+
+$ajax .= <<<HTML
+{$pm_alert}{$twofactor_alert}<script>
+<!--
+var dle_root       = '{$config['http_home_url']}';
+var dle_admin      = '{$config['admin_path']}';
+var dle_login_hash = '{$dle_login_hash}';
+var dle_group      = {$member_id['user_group']};
+var dle_skin       = '{$config['skin']}';
+var dle_wysiwyg    = '{$config['allow_comments_wysiwyg']}';
+var quick_wysiwyg  = '{$config['allow_quick_wysiwyg']}';
+var dle_min_search = '{$config['search_length_min']}';
+var dle_act_lang   = ["{$lang['p_yes']}", "{$lang['p_no']}", "{$lang['p_enter']}", "{$lang['p_cancel']}", "{$lang['p_save']}", "{$lang['p_del']}", "{$lang['ajax_info']}"];
+var menu_short     = '{$lang['menu_short']}';
+var menu_full      = '{$lang['menu_full']}';
+var menu_profile   = '{$lang['menu_profile']}';
+var menu_send      = '{$lang['menu_send']}';
+var menu_uedit     = '{$lang['menu_uedit']}';
+var dle_info       = '{$lang['p_info']}';
+var dle_confirm    = '{$lang['p_confirm']}';
+var dle_prompt     = '{$lang['p_prompt']}';
+var dle_req_field  = ["{$lang['req_field_1']}", "{$lang['req_field_2']}", "{$lang['req_field_3']}"];
+var dle_del_agree  = '{$lang['news_delcom']}';
+var dle_spam_agree = '{$lang['mark_spam']}';
+var dle_c_title    = '{$lang['complaint_title']}';
+var dle_complaint  = '{$lang['add_to_complaint']}';
+var dle_mail       = '{$lang['reply_mail']}';
+var dle_big_text   = '{$lang['big_text']}';
+var dle_orfo_title = '{$lang['orfo_title']}';
+var dle_p_send     = '{$lang['p_send']}';
+var dle_p_send_ok  = '{$lang['p_send_ok']}';
+var dle_save_ok    = '{$lang['n_save_ok']}';
+var dle_reply_title= '{$lang['reply_comments']}';
+var dle_tree_comm  = '{$dle_tree_comments}';
+var dle_del_news   = '{$lang['news_delnews']}';
+var dle_sub_agree  = '{$lang['subscribe_info_3']}';
+var dle_unsub_agree  = '{$lang['subscribe_info_4']}';
+var dle_captcha_type  = '{$config['allow_recaptcha']}';
+var dle_share_interesting  = ["{$lang['share_i_1']}", "{$lang['share_i_2']}", "{$lang['share_i_3']}", "{$lang['share_i_4']}", "{$lang['share_i_5']}", "{$lang['share_i_6']}"];
+var DLEPlayerLang     = {prev: '{$lang['player_prev']}',next: '{$lang['player_next']}',play: '{$lang['player_play']}',pause: '{$lang['player_pause']}',mute: '{$lang['player_mute']}', unmute: '{$lang['player_unmute']}', settings: '{$lang['player_settings']}', enterFullscreen: '{$lang['player_fullscreen']}', exitFullscreen: '{$lang['player_efullscreen']}', speed: '{$lang['player_speed']}', normal: '{$lang['player_normal']}', quality: '{$lang['player_quality']}', pip: '{$lang['player_pip']}'};
+var DLEGalleryLang    = {CLOSE: '{$lang['thumb_closetitle']}', NEXT: '{$lang['thumb_nexttitle']}', PREV: '{$lang['thumb_previoustitle']}', ERROR: '{$lang['all_err_1']}', IMAGE_ERROR: '{$lang['thumb_imageerror']}', TOGGLE_SLIDESHOW: '{$lang['thumb_playtitle']}',TOGGLE_FULLSCREEN: '{$lang['thumb_fullscreen']}', TOGGLE_THUMBS: '{$lang['thumb_thtoggle']}', ITERATEZOOM: '{$lang['thumb_thzoom']}', DOWNLOAD: '{$lang['thumb_thdownload']}' };
+var DLEGalleryMode    = {$config['thumb_gallery']};
+var DLELazyMode       = {$config['image_lazy']};\n
+HTML;
+
+if ($user_group[$member_id['user_group']]['allow_all_edit']) {
+
+	$ajax .= <<<HTML
+var dle_notice     = '{$lang['btn_notice']}';
+var dle_p_text     = '{$lang['p_text']}';
+var dle_del_msg    = '{$lang['p_message']}';
+var allow_dle_delete_news   = true;\n
+HTML;
+
+} else {
+
+	$ajax .= <<<HTML
+var allow_dle_delete_news   = false;\n
 HTML;
 
 }
 
-echofooter();
+if ($config['fast_search'] AND $user_group[$member_id['user_group']]['allow_search']) {
+
+	$ajax .= <<<HTML
+var dle_search_delay   = false;
+var dle_search_value   = '';
+HTML;
+
+	$onload_scripts[] = "FastSearch();";
+
+}
+
+if (strpos ( $tpl->result['content'], "<pre" ) !== false OR strpos ( $tpl->copy_template, "<pre" ) !== false) {
+
+	$js_array[] = "engine/classes/highlight/highlight.code.js";
+
+}
+
+if ( (strpos ( $tpl->result['content'], "highslide" ) !== false OR strpos ( $tpl->copy_template, "highslide" ) !== false) AND $dle_module != "addnews") {
+
+	$js_array[] = "engine/classes/fancybox/fancybox.js";
+
+}
+
+if ( strpos ( $tpl->result['content'], "data-src=" ) !== false OR strpos ( $tpl->copy_template, "data-src=" ) !== false ) {
+	$js_array[] = "engine/classes/js/lazyload.js";
+}
+
+if ( strpos ( $tpl->result['content'], "share-content" ) !== false OR strpos ( $tpl->copy_template, "share-content" ) !== false ) {
+	
+	$js_array[] = "engine/classes/masha/masha.js";
+	
+}
+
+if (strpos ( $tpl->result['content'], "dleplyrplayer" ) !== false OR strpos ( $tpl->copy_template, "dleplyrplayer" ) !== false) {
+  if ( strpos ( $tpl->result['content'], ".m3u8" ) !== false OR strpos ( $tpl->copy_template, ".m3u8" ) !== false ) {
+	 $js_array[] = "engine/classes/html5player/hls.js";
+  }
+  $css_array[] = "engine/classes/html5player/plyr.css";
+  $js_array[] = "engine/classes/html5player/plyr.js";
+  
+} elseif (strpos ( $tpl->result['content'], "dleaudioplayer" ) !== false OR strpos ( $tpl->result['content'], "dlevideoplayer" ) !== false OR strpos ( $tpl->copy_template, "dlevideoplayer" ) !== false OR strpos ( $tpl->copy_template, "dleaudioplayer" ) !== false) {
+	
+  $css_array[] = "engine/classes/html5player/player.css";
+  $js_array[] = "engine/classes/html5player/player.js";
+  
+}
+
+if( $user_group[$member_id['user_group']]['allow_pm'] ) {
+	$allow_comments_ajax = true;
+}
+
+if ($allow_comments_ajax AND ( ($config['allow_quick_wysiwyg'] == "2" AND ($user_group[$member_id['user_group']]['allow_edit'] OR $user_group[$member_id['user_group']]['allow_all_edit']) ) OR $config['allow_comments_wysiwyg'] == "2") AND $dle_module != "addnews") {
+
+    $js_array[] = "engine/editor/jscripts/tiny_mce/tinymce.min.js";
+
+}
+
+if ($allow_comments_ajax AND ( ($config['allow_quick_wysiwyg'] == "1" AND ($user_group[$member_id['user_group']]['allow_edit'] OR $user_group[$member_id['user_group']]['allow_all_edit']) ) OR $config['allow_comments_wysiwyg'] == "1") AND $dle_module != "addnews" ) {
+	
+	$js_array[] = "engine/skins/codemirror/js/code.js";
+	$js_array[] = "engine/editor/jscripts/froala/editor.js";
+	$js_array[] = "engine/editor/jscripts/froala/languages/{$lang['language_code']}.js";
+	$css_array[] = "engine/editor/jscripts/froala/fonts/font-awesome.css";
+	$css_array[] = "engine/editor/jscripts/froala/css/editor.css";
+
+}
+
+if ($config['allow_admin_wysiwyg'] == "1" OR $config['allow_site_wysiwyg'] == "1" OR $config['allow_static_wysiwyg'] == "1" OR $config['allow_quick_wysiwyg'] == "1" ) {
+	$css_array[] = "engine/editor/css/default.css";
+
+}
+
+$js_array = build_css($css_array, $config)."\n".build_js($js_array, $config);
+
+$schema = DLESEO::CompileSchema();
+
+if($schema) {
+	$js_array .= "\n<script type=\"application/ld+json\">".DLESEO::CompileSchema()."</script>";	
+}
+
+$show_error_info = false;
+
+if( $_SERVER['QUERY_STRING'] AND !$tpl->result['content'] AND !$tpl->result['info'] AND stripos ( $tpl->copy_template, "{content}" ) !== false ) {
+	$show_error_info = true;
+}
+
+if($dle_module == "main" AND $config['start_site'] == 2 ) {
+	$show_error_info = false;
+}
+
+if( $show_error_info ) {
+
+	@header( "HTTP/1.0 404 Not Found" );
+	$need_404 = false;
+	
+	if( $config['own_404'] AND file_exists(ROOT_DIR . '/404.html') ) {
+		@header("Content-type: text/html; charset=".$config['charset']);
+		echo file_get_contents( ROOT_DIR . '/404.html' );
+		die();
+		
+	} else msgbox( $lang['all_err_1'], $lang['news_err_27'] );
+
+}
+
+if($need_404) {
+	@header( "HTTP/1.0 404 Not Found" );
+}
+
+if( is_array($tpl->onload_scripts) AND count($tpl->onload_scripts) ) {
+	$onload_scripts = array_merge($onload_scripts, $tpl->onload_scripts);
+}
+
+if ( count($onload_scripts) ) {
+	
+	$onload_scripts =implode("\n", $onload_scripts);
+
+	$ajax .= <<<HTML
+
+jQuery(function($){
+{$onload_scripts}
+});
+HTML;
+
+} else $onload_scripts="";
+
+$ajax .= <<<HTML
+
+//-->
+</script>
+HTML;
+
+if( ($tpl->result['content'] AND isset($tpl->result['navigation']) AND $tpl->result['navigation']) OR defined('CUSTOMNAVIGATION') ) {
+
+	$tpl->set( '[navigation]', "" );
+	$tpl->set( '[/navigation]', "" );
+	$tpl->set_block( "'\\[not-navigation\\](.*?)\\[/not-navigation\\]'si", "" );
+		
+	if( stripos ( $tpl->copy_template, "{navigation}" ) !== false )	{
+
+		$tpl->result['content'] = str_replace ( '{newsnavigation}', '', $tpl->result['content'] );
+		$tpl->copy_template = str_replace ( '{newsnavigation}', '', $tpl->copy_template );
+			
+		if( $tpl->result['navigation'] AND stripos ( $tpl->copy_template, "{content}" ) !== false ) {
+			
+			$tpl->set( '{navigation}', $tpl->result['navigation'] );
+			
+		} else {
+			
+			$tpl->set( '{navigation}', $custom_navigation );
+			
+		}
+
+	} else {
+		
+		$tpl->result['content'] = str_replace ( '{newsnavigation}', $tpl->result['navigation'], $tpl->result['content'] );
+		$tpl->copy_template = str_replace ( '{newsnavigation}', $custom_navigation, $tpl->copy_template );
+
+	}
+
+} else {
+	
+	$tpl->set( '{navigation}', "" );
+	$tpl->set( '[not-navigation]', "" );
+	$tpl->set( '[/not-navigation]', "" );
+	$tpl->set_block( "'\\[navigation\\](.*?)\\[/navigation\\]'si", "" );
+	
+}
+
+
+if (stripos ( $tpl->copy_template, "{jsfiles}" ) !== false) {
+	$tpl->set ( '{headers}', $metatags );
+	$tpl->set ( '{jsfiles}', $js_array );
+} else {
+	$tpl->set ( '{headers}', $metatags."\n".$js_array );
+}
+
+$tpl->set ( '{AJAX}', $ajax );
+$tpl->set ( '{info}',  $tpl->result['info'] );
+
+$tpl->set ( '{content}', $tpl->result['content'] );
+
+$tpl->compile ( 'main' );
+
+if( $is_logged AND stripos ( $tpl->result['main'], "-favorites-" ) !== false) {
+	
+	$fav_arr = explode(',', $member_id['favorites'] );
+	
+	foreach( $fav_arr as $fav_id ) {
+		$tpl->result['main'] = str_replace ( "{-favorites-{$fav_id}}", "<a data-fav-id=\"{$fav_id}\" class=\"favorite-link del-favorite\" href=\"{$PHP_SELF}?do=favorites&amp;doaction=del&amp;id={$fav_id}\"><img src=\"{$config['http_home_url']}templates/{$config['skin']}/dleimages/minus_fav.gif\" onclick=\"doFavorites('{$fav_id}', 'minus', 0); return false;\" title=\"{$lang['news_minfav']}\" alt=\"\"></a>", $tpl->result['main'] );
+		$tpl->result['main'] = str_replace ( "[del-favorites-{$fav_id}]", "<span data-favorites-del=\"{$fav_id}\" style=\"display:none\"></span><a onclick=\"doFavorites('{$fav_id}', 'minus', 1, 'short'); return false;\" href=\"{$PHP_SELF}?do=favorites&amp;doaction=del&amp;id={$fav_id}\">", $tpl->result['main'] );
+		$tpl->result['main'] = str_replace ( "[/del-favorites-{$fav_id}]", "</a>", $tpl->result['main'] );
+		$tpl->result['main'] = preg_replace( "'\\[add-favorites-{$fav_id}\\](.*?)\\[/add-favorites-{$fav_id}\\]'is", "<span data-favorites-add=\"{$fav_id}\" style=\"display:none\"></span>", $tpl->result['main'] );
+	}
+	
+	$tpl->result['main'] = preg_replace( "'\\{-favorites-(\d+)\\}'i", "<a data-fav-id=\"\\1\" class=\"favorite-link add-favorite\" href=\"{$PHP_SELF}?do=favorites&amp;doaction=add&amp;id=\\1\"><img src=\"{$config['http_home_url']}templates/{$config['skin']}/dleimages/plus_fav.gif\" onclick=\"doFavorites('\\1', 'plus', 0); return false;\" title=\"{$lang['news_addfav']}\" alt=\"\"></a>", $tpl->result['main'] );
+	$tpl->result['main'] = preg_replace( "'\\[add-favorites-(\d+)\\]'i", "<span data-favorites-add=\"\\1\" style=\"display:none\"></span><a onclick=\"doFavorites('\\1', 'plus', 1, 'short'); return false;\" href=\"{$PHP_SELF}?do=favorites&amp;doaction=add&amp;id=\\1\">", $tpl->result['main'] );
+	$tpl->result['main'] = preg_replace( "'\\[/add-favorites-(\d+)\\]'i", "</a>", $tpl->result['main'] );
+	$tpl->result['main'] = preg_replace( "'\\[del-favorites-(\d+)\\](.*?)\\[/del-favorites-(\d+)\\]'si", "<span data-favorites-del=\"\\1\" style=\"display:none\"></span>", $tpl->result['main'] );
+
+}
+
+if ($config['allow_links'] and isset($replace_links['all']) ) $tpl->result['main'] = replace_links ( $tpl->result['main'], $replace_links['all'] );
+
+$tpl->result['main'] = str_ireplace( '{THEME}', $config['http_home_url'] . 'templates/' . $config['skin'], $tpl->result['main'] );
+
+if ($replace_url) $tpl->result['main'] = str_replace ( $replace_url[0]."/", $replace_url[1]."/", $tpl->result['main'] );
+
+if($remove_canonical) {
+	$tpl->result['main'] = preg_replace( "#<link rel=['\"]canonical['\"](.+?)>#i", "", $tpl->result['main'] );
+}
+
+$tpl->result['main'] = str_replace ( 'src="http://'.$_SERVER['HTTP_HOST'].'/', 'src="/', $tpl->result['main'] );
+$tpl->result['main'] = str_replace ( 'srcset="http://'.$_SERVER['HTTP_HOST'].'/', 'srcset="/', $tpl->result['main'] );
+$tpl->result['main'] = str_replace ( 'src="https://'.$_SERVER['HTTP_HOST'].'/', 'src="/', $tpl->result['main'] );
+$tpl->result['main'] = str_replace ( 'srcset="https://'.$_SERVER['HTTP_HOST'].'/', 'srcset="/', $tpl->result['main'] );
+
+echo $tpl->result['main'];
+
+$tpl->global_clear();
+
+$db->close();
+
+echo "\n<!-- DataLife Engine Copyright SoftNews Media Group (https://dle-news.ru) -->\r\n";
+
+GzipOut();
+
 ?>
